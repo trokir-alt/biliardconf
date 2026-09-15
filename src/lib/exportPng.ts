@@ -88,20 +88,24 @@ const MAX_PIXELS = 16_000_000
 const MAX_SIDE = 8192
 
 /**
- * 1x..3x is the whole range the UI offers; anything outside it is a caller bug
- * or a NaN, so it is clamped rather than trusted. The canvas limits may lower
- * the ratio further, but never below 1 - a picture smaller than the stage is
- * worse than no export at all.
+ * Do NOT clamp this to the 1..3 of the UI labels.
+ *
+ * The caller does not pass 1/2/3 through: App.tsx turns "1x" into a fixed
+ * reference width for the picture, so the ratio it asks for is
+ * EXPORT_BASE_PX / stage long side * scale. On a phone that is legitimately 6
+ * or 7, and capping it at 3 is exactly the bug this indirection exists to
+ * avoid - the coach's diagram would arrive at whatever size their screen
+ * happened to be. Only the canvas limits below may lower it.
  */
 function safePixelRatio(stage: Konva.Stage, wanted: number): number {
-  let ratio = Math.min(3, Math.max(1, Number.isFinite(wanted) && wanted > 0 ? wanted : 1))
+  let ratio = Math.min(16, Math.max(0.25, Number.isFinite(wanted) && wanted > 0 ? wanted : 1))
   const w = stage.width()
   const h = stage.height()
   while (
-    ratio > 1 &&
+    ratio > 0.25 &&
     (w * ratio * h * ratio > MAX_PIXELS || w * ratio > MAX_SIDE || h * ratio > MAX_SIDE)
   ) {
-    ratio = Math.max(1, ratio - 0.25)
+    ratio = Math.max(0.25, ratio - 0.25)
   }
   return ratio
 }

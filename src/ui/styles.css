@@ -84,6 +84,15 @@ input {
   display: block;
 }
 
+/* A canvas that pans or zooms the page under a finger is unusable, so the whole
+   Konva subtree opts out of browser touch gestures. Konva builds its own
+   wrapper divs inside .stage-wrap, hence the three selectors. */
+.stage-wrap > div,
+.stage-wrap .konvajs-content,
+.stage-wrap canvas {
+  touch-action: none;
+}
+
 .stage-wrap__hint {
   position: absolute;
   left: 50%;

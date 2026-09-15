@@ -54,14 +54,6 @@ export function SceneStage({ stageRef }: SceneStageProps) {
     return () => ro.disconnect()
   }, [])
 
-  /* Konva creates its own container div; a canvas that scrolls the page on
-     touch is unusable, so opt the gestures out here rather than in the css. */
-  useEffect(() => {
-    const stage = stageRef.current
-    if (!stage) return
-    stage.container().style.touchAction = 'none'
-  }, [stageRef, layout.stageW, layout.stageH])
-
   /* ------------------------------------------------------------- pointers */
 
   const pointerMm = useCallback(() => {
