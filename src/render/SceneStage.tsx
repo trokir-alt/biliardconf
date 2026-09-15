@@ -23,6 +23,7 @@ import { useView } from '../state/view'
 import { ItemView } from './ItemView'
 import { Handles } from './Handles'
 import { TableView } from './TableView'
+import { Watermarks } from './Watermark'
 import { ZOOM_MAX, ZOOM_MIN, clampPan, computeLayout, pxToMm, type StageLayout, type Viewport } from './layout'
 
 /** below this the table is turned upright, spec section 9 */
@@ -781,6 +782,8 @@ export function SceneStage({ stageRef }: SceneStageProps) {
                 />
               </Group>
             )}
+            {/* over every object, so nothing on the table can cover the name */}
+            <Watermarks g={g} />
             {selecting && selected && selected.type !== 'ball' && selected.type !== 'ghostBall' && (
               <Handles
                 item={selected}

@@ -121,6 +121,9 @@ export async function renderExport(stage: Konva.Stage, opts: ExportOptions): Pro
   // two frames to push those into the Konva nodes, or the picture would carry
   // the selection ring or come out as a zoomed-in crop
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  // the name on the table is part of every picture: anything that hid it
+  // from the devtools console is undone before the layers are read
+  stage.find('.watermark, .watermark-rail, .watermarks').forEach((n) => n.show())
   stage.batchDraw()
 
   const pixelRatio = safePixelRatio(stage, opts.pixelRatio)

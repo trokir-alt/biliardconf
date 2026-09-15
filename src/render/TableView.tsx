@@ -15,7 +15,7 @@
  * differently and the table reads as a photograph rather than a diagram.
  */
 
-import { Circle, Group, Line, Rect, Ring, Shape, Text } from 'react-konva'
+import { Circle, Group, Line, Rect, Ring, Shape } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
 import type { Shape as KonvaShape } from 'konva/lib/Shape'
 import type { Pocket, TableGeometry } from '../model/table'
@@ -27,9 +27,7 @@ import {
 } from '../model/table'
 import type { Vec } from '../model/types'
 import type { ClothPalette } from '../model/theme'
-import { CLOTH, MARKING, MARKING_SPOT, POCKET_THROAT, SIGHT, WATERMARK, WOOD } from '../model/theme'
-import { WATERMARK_FONT } from '../model/fonts'
-import { useStore } from '../state/store'
+import { CLOTH, MARKING, MARKING_SPOT, POCKET_THROAT, SIGHT, WOOD } from '../model/theme'
 
 /* ------------------------------------------------------------ mm constants */
 
@@ -287,41 +285,6 @@ function Cushion({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
   )
 }
 
-/**
- * The coach's name along the diagonal of the cloth, big and faint. It reads
- * from the lower left up to the upper right of the screen: on the flat table
- * that is the diagonal from (0, W) to (L, 0); on the upright table the layer
- * turns a quarter clockwise, so the same screen reading takes the other
- * diagonal, from (L, W) to (0, 0).
- */
-function Watermark({ g }: { g: TableGeometry }) {
-  const upright = useStore((s) => s.orientation) === 'vertical'
-  const L = g.lengthMm
-  const W = g.widthMm
-  const diag = Math.hypot(L, W)
-  const tilt = (Math.atan2(W, L) * 180) / Math.PI // 26.6 degrees on a 2:1 table
-  const rotation = upright ? tilt - 180 : -tilt
-  return (
-    <Group x={L / 2} y={W / 2} rotation={rotation} listening={false}>
-      <Text
-        name="watermark"
-        x={-diag / 2}
-        y={-WATERMARK.sizeMm / 2}
-        width={diag}
-        align="center"
-        text={WATERMARK.text}
-        fontFamily={WATERMARK_FONT}
-        fontSize={WATERMARK.sizeMm}
-        fontStyle="italic 800"
-        letterSpacing={WATERMARK.letterSpacingMm}
-        fill={WATERMARK.fill}
-        opacity={WATERMARK.opacity}
-        listening={false}
-      />
-    </Group>
-  )
-}
-
 /** the shadow a cushion nose drops onto the bed - drawn over the markings */
 function CushionShadow({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
   const a: Vec = { x: poly[0], y: poly[1] }
@@ -522,10 +485,6 @@ export function TableView({ g }: { g: TableGeometry }): JSX.Element {
           ))}
         </Group>
       )}
-
-      {/* 7b. the watermark runs along the diagonal, over the markings and
-          under everything on the scene layer */}
-      <Watermark g={g} />
 
       {/* 8. corner pockets go under the cushions: the rounded rubber ends lie
           over the ring, which is how the corner reads on a broadcast */}

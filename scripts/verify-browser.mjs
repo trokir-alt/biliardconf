@@ -528,7 +528,81 @@ async function picture(page, label) {
       if (d >= 4 && d <= 60) glyph++
       if (d > 60) loud++
     }
-    return { text: node ? node.text() : null, font: node ? node.fontFamily() : null, glyphPct: (glyph / n) * 100, loud }
+    // the rail plate: dark letters on the wood, sampled along its own baseline
+    const rail = window.__stage.find('.watermark-rail')[0]
+    let railGlyph = 0, railN = 0
+    if (rail) {
+      const rx = rail.x() + rail.width() / 2, ry = rail.y() + rail.height() / 2
+      const rbase = luma({ x: rx, y: ry + 45 }) // wood just below the plate
+      for (let t = -150; t <= 150; t += 3) {
+        railN++
+        if (rbase - luma({ x: rx + t, y: ry + 6 }) >= 8) railGlyph++
+      }
+    }
+    // z-order: the watermark group comes after the objects group on its layer
+    const wmGroup = window.__stage.find('.watermarks')[0]
+    const above = wmGroup ? wmGroup.getZIndex() > 0 && wmGroup.getParent().className === 'Layer' : false
+    return {
+      text: node ? node.text() : null,
+      font: node ? node.fontFamily() : null,
+      glyphPct: (glyph / n) * 100,
+      loud,
+      railText: rail ? rail.text() : null,
+      railGlyphPct: railN ? (railGlyph / railN) * 100 : 0,
+      above,
+    }
+  })
+  check(`${label}: the rail plate carries the name`, wm.railText === 'Алексей Соць', String(wm.railText))
+  check(`${label}: the rail plate is engraved into the wood`, wm.railGlyphPct >= 10, `${wm.railGlyphPct.toFixed(0)}% of samples on letters`)
+  check(`${label}: the watermark group is drawn above the objects`, wm.above === true)
+  // nothing on the table can cover it: a zone over the whole cloth and a ball on the name
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.addItem({ id: 'v-cover', type: 'zone', x: 0, y: 0, w: 3550, h: 1775, shape: 'rect', color: '#1D6FA8', opacity: 0.25 }, 'top')
+    st.addBall('white', { x: 1775, y: 887.5 })
+    st.select(null)
+  })
+  await page.waitForTimeout(300)
+  const covered = await page.evaluate(() => {
+    const layers = [...document.querySelectorAll('.konvajs-content canvas')]
+    const canvas = document.createElement('canvas')
+    canvas.width = layers[0].width
+    canvas.height = layers[0].height
+    const g = canvas.getContext('2d')
+    for (const l of layers) g.drawImage(l, 0, 0)
+    const L = window.__layout
+    const dpr = canvas.width / parseFloat(layers[0].style.width)
+    const img = g.getImageData(0, 0, canvas.width, canvas.height).data
+    const luma = (mx, my) => {
+      const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
+      const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
+      const i = (Math.round(sy * dpr) * canvas.width + Math.round(sx * dpr)) * 4
+      return 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2]
+    }
+    const sc = window.__store.getState().scene
+    const LEN = sc.table.lengthMm, WID = sc.table.widthMm
+    const cx = LEN / 2, cy = WID / 2
+    const tilt = Math.atan2(WID, LEN)
+    const dir = L.rotation === 90 ? { x: -Math.cos(tilt), y: -Math.sin(tilt) } : { x: Math.cos(tilt), y: -Math.sin(tilt) }
+    const along = (t) => ({ x: cx + dir.x * t + dir.y * 40, y: cy + dir.y * t - dir.x * 40 })
+    const base = luma({ x: cx + dir.y * 500, y: cy - dir.x * 500 })
+    const onMarking = (p) =>
+      [LEN / 4, LEN / 2, (3 * LEN) / 4].some((x) => Math.abs(p.x - x) < 12) || Math.abs(p.y - WID / 2) < 12
+    let glyph = 0, n = 0
+    for (let t = -1500; t <= 1500; t += 4) {
+      const p = along(t)
+      if (onMarking(p) || Math.hypot(p.x - cx, p.y - cy) < 60) continue
+      n++
+      const d = Math.abs(luma(p) - base)
+      if (d >= 4 && d <= 60) glyph++
+    }
+    return (glyph / n) * 100
+  })
+  check(`${label}: a zone over the whole cloth does not hide the watermark`, covered >= 8, `${covered.toFixed(0)}% of samples on glyphs`)
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.select('v-cover')
+    st.removeSelected()
   })
   check(`${label}: the watermark text node is on the table`, wm.text === 'Алексей Соць', String(wm.text))
   check(`${label}: the watermark uses the serif face`, wm.font === 'Exercise Serif', String(wm.font))
