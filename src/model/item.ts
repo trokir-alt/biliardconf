@@ -45,7 +45,14 @@ export function itemBounds(item: Item, ballMm: number): Rect {
     case 'strikePoint':
       return box([item.x], [item.y], item.sizeMm / 2)
     case 'power':
-      return { x: item.x - POWER_W / 2, y: item.y - POWER_H / 2, w: POWER_W, h: POWER_H }
+      // the plate plus its +/- buttons: on the upright table those sit below
+      // the plate, right where a floating panel would otherwise land
+      return {
+        x: item.x - POWER_W / 2 - POWER_BTN_MM,
+        y: item.y - POWER_H / 2,
+        w: POWER_W + 2 * POWER_BTN_MM,
+        h: POWER_H,
+      }
     case 'ghostBall':
       return box([item.x], [item.y], ballMm / 2)
     case 'text':
@@ -68,6 +75,8 @@ export type Handle = { id: string; at: Vec; kind: 'end' | 'bend' | 'corner' | 'r
 /** the strength plate, in mm */
 export const POWER_W = 420
 export const POWER_H = 100
+/** how far the +/- buttons reach past each end of the plate, in mm */
+export const POWER_BTN_MM = 66
 /** the strike-point ball may be resized between these */
 export const STRIKE_MIN_MM = 200
 export const STRIKE_MAX_MM = 500

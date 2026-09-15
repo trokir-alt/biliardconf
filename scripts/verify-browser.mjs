@@ -353,11 +353,29 @@ async function stage3(page, label) {
   check(`${label}: strike point is placed by a tap`, !!sp && sp.sizeMm === 300 && sp.dot.u === 0 && sp.dot.v === 0)
   await tool(page, 'Выбор')
   const r = sp.sizeMm / 2
-  // drag the dot from the centre to (0.5 r, -0.3 r) and compare with the release point
+  // drag the dot from the centre to (0.5 r, -0.3 r) and compare with the
+  // release point. Mouse events carry whole css pixels, so the point the app
+  // saw is the rounded press and release positions, not the fractional ones
   const target = { x: sp.x + 0.5 * r, y: sp.y - 0.3 * r }
-  await gesture(page, { x: sp.x, y: sp.y }, target)
+  const [px0, py0] = await toPage(page, sp.x, sp.y)
+  const [px1, py1] = await toPage(page, target.x, target.y)
+  const grab = { x: Math.round(px0) - px0, y: Math.round(py0) - py0 } // press offset from the dot centre
+  await page.mouse.move(Math.round(px0), Math.round(py0))
+  await page.mouse.down()
+  await page.mouse.move(Math.round(px1), Math.round(py1), { steps: 18 })
+  await page.mouse.up()
+  await page.waitForTimeout(150)
+  const seen = await page.evaluate(
+    ([x, y]) => {
+      const l = window.__layout
+      const c = document.querySelector('canvas').getBoundingClientRect()
+      const dx = x - c.left - l.x, dy = y - c.top - l.y
+      return l.rotation === 90 ? { x: dy / l.scale, y: -dx / l.scale } : { x: dx / l.scale, y: dy / l.scale }
+    },
+    [Math.round(px1) - grab.x, Math.round(py1) - grab.y],
+  )
   let it = (await scene(page)).items.find((i) => i.id === sp.id)
-  const err = Math.hypot(it.dot.u * r - 0.5 * r, it.dot.v * r - -0.3 * r) / r
+  const err = Math.hypot(it.dot.u * r - (seen.x - sp.x), it.dot.v * r - (seen.y - sp.y)) / r
   check(`${label}: dot lands within 2% of the radius of where it was released`, err <= 0.02, `${(err * 100).toFixed(2)}% (u=${it.dot.u.toFixed(3)}, v=${it.dot.v.toFixed(3)})`)
   check(`${label}: dragging the dot does not move the ball`, it.x === sp.x && it.y === sp.y)
 
