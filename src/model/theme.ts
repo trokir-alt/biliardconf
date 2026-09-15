@@ -62,10 +62,10 @@ export const MARKING = 'rgba(255,255,255,0.38)'
 export const WATERMARK = {
   text: 'Алексей Соць',
   fill: '#FFFFFF',
-  opacity: 0.16,
-  /** cap height, in mm; the table is 1775 mm across */
-  sizeMm: 120,
-  letterSpacingMm: 6,
+  opacity: 0.13,
+  /** font size in mm, along the table's diagonal (3969 mm on a 12-ft table) */
+  sizeMm: 380,
+  letterSpacingMm: 8,
 }
 export const MARKING_SPOT = 'rgba(255,255,255,0.72)'
 export const SIGHT = '#F4F0E7'

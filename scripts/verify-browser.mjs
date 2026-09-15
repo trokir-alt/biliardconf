@@ -509,21 +509,31 @@ async function picture(page, label) {
       return 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2]
     }
     const sc = window.__store.getState().scene
-    const cx = sc.table.lengthMm / 2, cy = sc.table.widthMm / 2
-    // the text runs along the screen's horizontal: table x when flat, table y upright
-    const along = (t) => (L.rotation === 90 ? { x: cx + 30, y: cy + t } : { x: cx + t, y: cy + 30 })
-    const base = luma(along(650)) // cloth next to the text, same distance from the centre
+    const LEN = sc.table.lengthMm, WID = sc.table.widthMm
+    const cx = LEN / 2, cy = WID / 2
+    // the text follows a diagonal: (0,W)->(L,0) flat, (L,W)->(0,0) upright
+    const tilt = Math.atan2(WID, LEN)
+    const dir = L.rotation === 90 ? { x: -Math.cos(tilt), y: -Math.sin(tilt) } : { x: Math.cos(tilt), y: -Math.sin(tilt) }
+    // 40 mm to one side of the baseline, through the lower-case bodies
+    const along = (t) => ({ x: cx + dir.x * t + dir.y * 40, y: cy + dir.y * t - dir.x * 40 })
+    const base = luma({ x: cx + dir.y * 500, y: cy - dir.x * 500 }) // cloth well off the text
+    const onMarking = (p) =>
+      [LEN / 4, LEN / 2, (3 * LEN) / 4].some((x) => Math.abs(p.x - x) < 12) || Math.abs(p.y - WID / 2) < 12
     let glyph = 0, loud = 0, n = 0
-    for (let t = -420; t <= 420; t += 3) {
-      if (Math.abs(t) < 12) continue // the centre line crosses here
-      const d = Math.abs(luma(along(t)) - base)
+    for (let t = -1500; t <= 1500; t += 4) {
+      const p = along(t)
+      if (onMarking(p)) continue
+      const d = Math.abs(luma(p) - base)
       n++
       if (d >= 4 && d <= 60) glyph++
       if (d > 60) loud++
     }
-    return { text: node ? node.text() : null, glyphPct: (glyph / n) * 100, loud }
+    return { text: node ? node.text() : null, font: node ? node.fontFamily() : null, glyphPct: (glyph / n) * 100, loud }
   })
   check(`${label}: the watermark text node is on the table`, wm.text === 'Алексей Соць', String(wm.text))
+  check(`${label}: the watermark uses the serif face`, wm.font === 'Exercise Serif', String(wm.font))
+  const wmFont = await page.evaluate(() => document.fonts.check('italic 800 16px "Exercise Serif"', 'Алексей Соць'))
+  check(`${label}: the watermark font is loaded from our origin`, wmFont === true)
   check(`${label}: the watermark is visible on the cloth`, wm.glyphPct >= 8, `${wm.glyphPct.toFixed(0)}% of samples on glyphs`)
   check(`${label}: ...and faint`, wm.loud === 0, `${wm.loud} loud samples`)
 
