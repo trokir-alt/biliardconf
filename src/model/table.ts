@@ -287,11 +287,43 @@ export function houseRect(g: TableGeometry) {
   return { x: 0, y: 0, w: g.houseLineX, h: g.widthMm }
 }
 
-/** Clamp a ball centre so the ball stays fully on the play field. */
+/**
+ * Clamp a ball centre so the ball stays on the play field - with one exception.
+ *
+ * Over a pocket mouth the ball is allowed off the bed: "шар в лузе" is a normal
+ * element of an exercise, and a coach has to be able to draw it. So the legal
+ * region is the field inset by one radius, UNION a disc of one radius around
+ * each pocket's drop point. Everywhere else the limit is hard, which is what
+ * stops a ball being buried in the rubber.
+ */
 export function clampToField(g: TableGeometry, p: Vec, ballMm: number): Vec {
   const r = ballMm / 2
-  return {
+  const hard = {
     x: Math.min(Math.max(p.x, r), g.lengthMm - r),
     y: Math.min(Math.max(p.y, r), g.widthMm - r),
   }
+  if (hard.x === p.x && hard.y === p.y) return p
+
+  // outside the bed: fall back to whichever is nearer, the bed or a pocket
+  let best = hard
+  let bestD = Math.hypot(p.x - hard.x, p.y - hard.y)
+  for (const pocket of g.pockets) {
+    const dx = p.x - pocket.at.x
+    const dy = p.y - pocket.at.y
+    const d = Math.hypot(dx, dy)
+    if (d <= r) return p
+    const q = { x: pocket.at.x + (dx / d) * r, y: pocket.at.y + (dy / d) * r }
+    const dq = Math.hypot(p.x - q.x, p.y - q.y)
+    if (dq < bestD) {
+      best = q
+      bestD = dq
+    }
+  }
+  return best
+}
+
+/** True when a ball centre sits in a pocket rather than on the bed. */
+export function inPocket(g: TableGeometry, p: Vec, ballMm: number): boolean {
+  const r = ballMm / 2
+  return g.pockets.some((pk) => Math.hypot(p.x - pk.at.x, p.y - pk.at.y) <= r + 0.01)
 }

@@ -41,6 +41,13 @@ export type BallItem = ItemBase & {
 export type StrokeStyle = 'solid' | 'dashed'
 export type ArrowHead = 'end' | 'both' | 'none'
 
+/**
+ * `points` is [A, B] for a straight arrow and [A, P, B] for a curved one, where
+ * P is a point the curve passes THROUGH - not a Bezier control point. Storing
+ * the through-point is what lets the middle handle behave the way a hand
+ * expects: the curve follows the finger instead of leading it. The control
+ * point is derived at draw time, see `quadControl`.
+ */
 export type ArrowItem = ItemBase & {
   type: 'arrow'
   points: Vec[]
@@ -58,6 +65,11 @@ export type GhostTrailItem = ItemBase & {
   to: Vec
   /** number of ghost balls, 3..8 */
   count: number
+  /** recompute `count` from the length until the coach sets it by hand */
+  autoCount: boolean
+  /** the trail can run into an arrowhead, as it does on the reference */
+  head: boolean
+  color: string
 }
 
 export type ZoneItem = ItemBase & {

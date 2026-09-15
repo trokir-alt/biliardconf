@@ -1,3 +1,21 @@
+/* Served from our own origin - a CDN font would taint the canvas and break
+   PNG export. Subset of Liberation Sans, licence in public/fonts. */
+@font-face {
+  font-family: 'Exercise Sans';
+  src: url('/fonts/exercise-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Exercise Sans';
+  src: url('/fonts/exercise-bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 /*
  * The whole application stylesheet: reset, shell, toolbar. Imported once by
  * App.tsx. No @import and no url() anywhere - a remote asset would taint the
@@ -458,5 +476,259 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   * {
     transition: none !important;
+  }
+}
+
+/* ------------------------------------------------------------ stage 2 ui */
+
+/* nine tools in a tight two-column grid, icon + label each */
+.tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.tool-grid .btn--tool {
+  justify-content: flex-start;
+  padding: 0 10px;
+  min-height: 44px;
+  font-size: 13px;
+  gap: 8px;
+}
+
+/* captions above and below the table, edited in place */
+.caption {
+  display: block;
+  width: min(100%, 900px);
+  margin: 0 auto;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'Exercise Sans', var(--font);
+  padding: 6px 10px;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.caption:hover {
+  border-color: var(--panel-edge);
+}
+
+.caption:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.caption::placeholder {
+  color: var(--dim);
+  opacity: 0.7;
+}
+
+.caption--title {
+  font-size: 20px;
+  font-weight: 700;
+  text-align: center;
+  margin-top: 8px;
+}
+
+.caption--note {
+  font-size: 14px;
+  text-align: center;
+  resize: none;
+  line-height: 1.35;
+  margin-bottom: 2px;
+}
+
+/* the properties panel floats next to the selected object */
+.props {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  max-width: min(420px, calc(100% - 24px));
+}
+
+.props__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.props__label {
+  font-size: 12px;
+  color: var(--dim);
+  margin-right: 2px;
+}
+
+.swatch--sm {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+}
+
+.btn--icon {
+  min-width: 44px;
+  padding: 0;
+  font-size: 16px;
+}
+
+.btn--danger {
+  color: #ff8a80;
+}
+
+.btn--danger:hover {
+  border-color: #ff8a80;
+}
+
+.seg__value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 44px;
+  border-top: 1px solid var(--panel-edge);
+  border-bottom: 1px solid var(--panel-edge);
+  background: var(--btn);
+  font-variant-numeric: tabular-nums;
+}
+
+.stroke-sample {
+  display: block;
+  width: 22px;
+  background: currentColor;
+  border-radius: 2px;
+}
+
+.switch--inline {
+  gap: 8px;
+}
+
+.input {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-edge);
+  background: #171c21;
+  color: var(--text);
+  padding: 0 10px;
+}
+
+.input--sm {
+  width: 56px;
+  text-align: center;
+}
+
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* inline caption editor, sitting right over the caption on the canvas */
+.text-editor {
+  position: absolute;
+  z-index: 6;
+  transform: translateY(-50%);
+}
+
+.text-editor__field {
+  min-width: 220px;
+  min-height: 44px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 2px solid var(--accent);
+  background: var(--panel);
+  color: var(--text);
+  font: 700 16px 'Exercise Sans', var(--font);
+  resize: none;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.text-editor__field:focus {
+  outline: none;
+}
+
+/* modal caption editor for touch screens */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal__card {
+  width: min(480px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 14px;
+}
+
+.modal__card .text-editor__field {
+  width: 100%;
+  min-width: 0;
+  box-shadow: none;
+}
+
+.modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* brief confirmation of an export or copy */
+.toast {
+  position: fixed;
+  z-index: 30;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
+.toast--error {
+  border-color: #ff8a80;
+}
+
+@media (max-width: 860px) {
+  .tool-grid {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+
+  /* on a phone the panel is a strip along the bottom of the canvas area */
+  .props {
+    left: 8px !important;
+    right: 8px;
+    top: auto !important;
+    bottom: 8px;
+    max-width: none;
+  }
+
+  .caption--title {
+    font-size: 17px;
+  }
+
+  .caption--note {
+    font-size: 13px;
   }
 }

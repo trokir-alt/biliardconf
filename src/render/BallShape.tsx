@@ -10,6 +10,7 @@ import { Circle, Ellipse, Group, Text } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { BallItem } from '../model/types'
 import { BALL, SELECTION } from '../model/theme'
+import { CANVAS_FONT } from '../model/fonts'
 
 export type BallShapeProps = {
   item: BallItem
@@ -22,8 +23,6 @@ export type BallShapeProps = {
   onDragMove: (e: KonvaEventObject<DragEvent>) => void
   onDragEnd: (e: KonvaEventObject<DragEvent>) => void
 }
-
-const FONT_STACK = "system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif"
 
 const hex = (c: string): [number, number, number] => [
   parseInt(c.slice(1, 3), 16),
@@ -45,29 +44,30 @@ export function BallShape(props: BallShapeProps) {
   const r = ballMm / 2
   const pal = BALL[item.kind]
 
-  // Light comes from the upper left, so the gradient starts as a small bright
-  // spot there and runs into the shade colour past the lower-right rim.
+  // Light comes from the upper left. The shading is deliberately shallow: the
+  // rim may only be ~20% darker than the middle, because anything stronger eats
+  // the outer edge of the ball and a 67 mm ball starts reading as 55 mm on the
+  // exported picture. The ball stays at its base colour out to 0.82 of the
+  // gradient and only turns over after that.
   const bodyStops = [
     0,
-    mix(pal.base, '#FFFFFF', 0.62),
-    0.35,
+    mix(pal.base, '#FFFFFF', 0.45),
+    0.34,
     pal.base,
-    0.8,
-    mix(pal.base, pal.shade, 0.7),
+    0.82,
+    pal.base,
     1,
-    pal.shade,
+    mix(pal.base, pal.shade, 0.45),
   ]
 
-  // Alpha is all but gone well before the rim, so the shadow reads as contact
-  // softness rather than a disc - the gradient is circular while the shape is
-  // an ellipse, and the vertical rim sits at ~0.7 of the gradient radius.
+  // The contact shadow is offset down-right and kept small enough that it never
+  // closes into a ring round the ball: a ring is exactly what made the ball look
+  // smaller than it is.
   const shadowStops = [
     0,
-    'rgba(0,0,0,0.38)',
-    0.45,
-    'rgba(0,0,0,0.2)',
-    0.72,
-    'rgba(0,0,0,0.05)',
+    'rgba(0,0,0,0.34)',
+    0.55,
+    'rgba(0,0,0,0.14)',
     1,
     'rgba(0,0,0,0)',
   ]
@@ -86,14 +86,14 @@ export function BallShape(props: BallShapeProps) {
       onDragEnd={onDragEnd}
     >
       <Ellipse
-        x={r * 0.18}
-        y={r * 0.3}
-        radiusX={r * 1.02}
-        radiusY={r * 0.72}
+        x={r * 0.3}
+        y={r * 0.38}
+        radiusX={r * 0.94}
+        radiusY={r * 0.68}
         fillRadialGradientStartPoint={{ x: 0, y: 0 }}
         fillRadialGradientStartRadius={0}
         fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={r * 1.02}
+        fillRadialGradientEndRadius={r * 0.94}
         fillRadialGradientColorStops={shadowStops}
         listening={false}
       />
@@ -104,10 +104,10 @@ export function BallShape(props: BallShapeProps) {
       <Circle
         id={item.id}
         radius={r}
-        fillRadialGradientStartPoint={{ x: -r * 0.34, y: -r * 0.38 }}
-        fillRadialGradientStartRadius={r * 0.08}
-        fillRadialGradientEndPoint={{ x: r * 0.1, y: r * 0.14 }}
-        fillRadialGradientEndRadius={r * 1.22}
+        fillRadialGradientStartPoint={{ x: -r * 0.2, y: -r * 0.22 }}
+        fillRadialGradientStartRadius={r * 0.06}
+        fillRadialGradientEndPoint={{ x: r * 0.04, y: r * 0.06 }}
+        fillRadialGradientEndRadius={r * 1.06}
         fillRadialGradientColorStops={bodyStops}
         shadowColor={SELECTION}
         shadowBlur={28}
@@ -115,9 +115,10 @@ export function BallShape(props: BallShapeProps) {
         shadowEnabled={selected}
       />
 
-      {/* rim kept on its own shape: Konva has no strokeOpacity, and fading the
-          body would fade its fill too */}
-      <Circle radius={r} stroke={pal.rim} strokeWidth={1.2} opacity={0.45} listening={false} />
+      {/* A thin rim, so the ball keeps its edge against both pale cloth and the
+          dark of a pocket. Kept on its own shape: Konva has no strokeOpacity and
+          fading the body would fade its fill too. */}
+      <Circle radius={r} stroke={pal.rim} strokeWidth={1.6} opacity={0.5} listening={false} />
 
       <Ellipse
         x={-r * 0.36}
@@ -153,7 +154,7 @@ export function BallShape(props: BallShapeProps) {
           verticalAlign="middle"
           fontSize={r * 0.95}
           fontStyle="bold"
-          fontFamily={FONT_STACK}
+          fontFamily={CANVAS_FONT}
           fill={pal.text}
           listening={false}
         />

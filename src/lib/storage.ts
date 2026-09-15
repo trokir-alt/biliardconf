@@ -1,0 +1,193 @@
+/**
+ * Autosave.
+ *
+ * A coach works from a tablet in the hall, where the browser drops the tab out
+ * of memory without asking. Losing a half-built diagram is the most painful
+ * thing that can happen in this app and the cheapest to prevent, so the scene
+ * goes to localStorage on a 500 ms debounce and comes back on load.
+ *
+ * Everything read back is treated as hostile: localStorage survives across
+ * versions and a half-written or hand-edited value must never white-screen the
+ * app. Anything that does not validate is dropped and the coach gets an empty
+ * table instead of a crash.
+ */
+
+import type { ClothColor, Item, Scene } from '../model/types'
+import { DEFAULT_TABLE } from '../model/table'
+
+const KEY = 'biliardconf.scene.v1'
+const DEBOUNCE_MS = 500
+
+const num = (v: unknown, fallback: number): number =>
+  typeof v === 'number' && Number.isFinite(v) ? v : fallback
+
+const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+
+const vec = (v: unknown): { x: number; y: number } | null => {
+  if (!v || typeof v !== 'object') return null
+  const o = v as Record<string, unknown>
+  if (typeof o.x !== 'number' || typeof o.y !== 'number') return null
+  if (!Number.isFinite(o.x) || !Number.isFinite(o.y)) return null
+  return { x: o.x, y: o.y }
+}
+
+/** Keeps only items this build understands, with every field forced into range. */
+function parseItem(raw: unknown): Item | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  const id = str(o.id)
+  if (!id) return null
+  switch (o.type) {
+    case 'ball': {
+      const p = vec(o)
+      if (!p) return null
+      const kind = o.kind === 'cue' || o.kind === 'target' ? o.kind : 'white'
+      return { id, type: 'ball', x: p.x, y: p.y, kind, label: str(o.label) }
+    }
+    case 'arrow': {
+      if (!Array.isArray(o.points)) return null
+      const points = o.points.map(vec).filter((p): p is { x: number; y: number } => p !== null)
+      if (points.length < 2) return null
+      return {
+        id,
+        type: 'arrow',
+        points,
+        style: o.style === 'dashed' ? 'dashed' : 'solid',
+        color: str(o.color) ?? '#FFFFFF',
+        width: num(o.width, 14),
+        head: o.head === 'both' || o.head === 'none' ? o.head : 'end',
+        curved: points.length === 3,
+      }
+    }
+    case 'ghostTrail': {
+      const from = vec(o.from)
+      const to = vec(o.to)
+      if (!from || !to) return null
+      return {
+        id,
+        type: 'ghostTrail',
+        from,
+        to,
+        count: Math.min(8, Math.max(3, Math.round(num(o.count, 5)))),
+        autoCount: o.autoCount !== false,
+        head: o.head === true,
+        color: str(o.color) ?? '#FFFFFF',
+      }
+    }
+    case 'zone': {
+      const p = vec(o)
+      if (!p) return null
+      return {
+        id,
+        type: 'zone',
+        x: p.x,
+        y: p.y,
+        w: Math.abs(num(o.w, 0)),
+        h: Math.abs(num(o.h, 0)),
+        shape: o.shape === 'ellipse' ? 'ellipse' : 'rect',
+        color: str(o.color) ?? '#F5A623',
+        opacity: Math.min(1, Math.max(0, num(o.opacity, 0.25))),
+      }
+    }
+    case 'line': {
+      const from = vec(o.from)
+      const to = vec(o.to)
+      if (!from || !to) return null
+      return {
+        id,
+        type: 'line',
+        from,
+        to,
+        style: o.style === 'dashed' ? 'dashed' : 'solid',
+        color: str(o.color) ?? '#FFFFFF',
+        width: num(o.width, 14),
+      }
+    }
+    case 'text': {
+      const p = vec(o)
+      const text = str(o.text)
+      if (!p || !text) return null
+      return {
+        id,
+        type: 'text',
+        x: p.x,
+        y: p.y,
+        text,
+        size: num(o.size, 90),
+        color: str(o.color) ?? '#FFFFFF',
+        angle: num(o.angle, 0),
+      }
+    }
+    default:
+      return null
+  }
+}
+
+function parseScene(raw: unknown): Scene | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (o.version !== 1) return null
+  const t = (o.table ?? {}) as Record<string, unknown>
+  const cloth: ClothColor = t.cloth === 'green' ? 'green' : 'blue'
+  const items = Array.isArray(o.items)
+    ? o.items.map(parseItem).filter((i): i is Item => i !== null)
+    : []
+  return {
+    version: 1,
+    table: {
+      lengthMm: num(t.lengthMm, DEFAULT_TABLE.lengthMm),
+      widthMm: num(t.widthMm, DEFAULT_TABLE.widthMm),
+      ballMm: num(t.ballMm, DEFAULT_TABLE.ballMm),
+      markings: t.markings !== false,
+      cloth,
+    },
+    title: str(o.title),
+    note: str(o.note),
+    items,
+  }
+}
+
+export function loadScene(): Scene | null {
+  try {
+    const raw = window.localStorage.getItem(KEY)
+    if (!raw) return null
+    return parseScene(JSON.parse(raw))
+  } catch {
+    // private mode, blocked storage, or junk in the slot: start clean
+    return null
+  }
+}
+
+let timer: ReturnType<typeof setTimeout> | null = null
+let pending: Scene | null = null
+
+function flush(): void {
+  timer = null
+  if (!pending) return
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(pending))
+  } catch {
+    // quota or private mode: autosave is a convenience, never a hard failure
+  }
+  pending = null
+}
+
+export function saveScene(scene: Scene): void {
+  pending = scene
+  if (timer !== null) return
+  timer = setTimeout(flush, DEBOUNCE_MS)
+}
+
+/** Write immediately - used when the tab is going away. */
+export function flushScene(): void {
+  if (timer !== null) clearTimeout(timer)
+  flush()
+}
+
+export function clearSaved(): void {
+  try {
+    window.localStorage.removeItem(KEY)
+  } catch {
+    // nothing to do
+  }
+}

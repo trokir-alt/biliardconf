@@ -1,13 +1,24 @@
 /**
- * App shell: a toolbar and the canvas. The only logic that lives here is PNG
- * export, because that is the one action which needs the Konva stage itself.
+ * App shell: a toolbar, the canvas with its captions, and the panels that
+ * float over them. The only logic that lives here is export, because that is
+ * the one action which needs the Konva stage itself, and autosave, because it
+ * has to outlive every component.
  */
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type Konva from 'konva'
-import { SceneStage } from './render/SceneStage'
+import { SceneStage, StageHint } from './render/SceneStage'
 import { Toolbar } from './ui/Toolbar'
-import { downloadStagePng, exportFileName } from './lib/exportPng'
+import { Properties } from './ui/Properties'
+import { TextEditor } from './ui/TextEditor'
+import { NoteField, TitleField } from './ui/Captions'
+import {
+  copyExportToClipboard,
+  downloadExport,
+  exportFileName,
+  type ExportFormat,
+} from './lib/exportImage'
+import { flushScene, saveScene } from './lib/storage'
 import { useStore } from './state/store'
 import './ui/styles.css'
 
@@ -20,40 +31,91 @@ const EXPORT_BASE_PX = 1600
 
 export function App() {
   const stageRef = useRef<Konva.Stage | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null)
 
-  const handleExport = useCallback(async (scale: number) => {
+  /* autosave: every change, 500 ms after the last one, and on the way out */
+  useEffect(() => {
+    let last = useStore.getState().scene
+    const unsub = useStore.subscribe((s) => {
+      if (s.scene !== last) {
+        last = s.scene
+        saveScene(s.scene)
+      }
+    })
+    const flush = () => flushScene()
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    return () => {
+      unsub()
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), toast.error ? 6000 : 2500)
+    return () => clearTimeout(t)
+  }, [toast])
+
+  /** drop the selection and give React two frames to redraw without it */
+  const settle = useCallback(async () => {
+    useStore.getState().select(null)
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+  }, [])
+
+  const pixelRatioFor = (stage: Konva.Stage, scale: number) =>
+    (EXPORT_BASE_PX / Math.max(stage.width(), stage.height(), 1)) * scale
+
+  const handleExport = useCallback(
+    async (scale: number, format: ExportFormat) => {
+      const stage = stageRef.current
+      if (!stage) return
+      await settle()
+      const { title, note } = useStore.getState().scene
+      try {
+        const { bytes } = await downloadExport(stage, {
+          pixelRatio: pixelRatioFor(stage, scale),
+          format,
+          title,
+          note,
+          fileName: exportFileName(title, new Date(), format),
+        })
+        setToast({ text: `Сохранено, ${Math.round(bytes / 1024)} КБ`, error: false })
+      } catch (e) {
+        setToast({ text: e instanceof Error ? e.message : 'Не удалось сохранить', error: true })
+      }
+    },
+    [settle],
+  )
+
+  /* No await before clipboard.write: Safari only allows it inside the click. */
+  const handleCopy = useCallback((scale: number) => {
     const stage = stageRef.current
     if (!stage) return
-
-    // the selection ring must not end up in the picture
     useStore.getState().select(null)
-    await new Promise<void>((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-    )
-    stage.batchDraw()
-
-    const longSide = Math.max(stage.width(), stage.height(), 1)
-    const pixelRatio = (EXPORT_BASE_PX / longSide) * scale
-
-    try {
-      setError(null)
-      await downloadStagePng(stage, {
-        pixelRatio,
-        fileName: exportFileName(useStore.getState().scene.title, new Date()),
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Не удалось сохранить PNG')
-    }
+    const { title, note } = useStore.getState().scene
+    copyExportToClipboard(stage, { pixelRatio: pixelRatioFor(stage, scale), title, note })
+      .then(() => setToast({ text: 'Скопировано в буфер', error: false }))
+      .catch((e: unknown) =>
+        setToast({ text: e instanceof Error ? e.message : 'Не удалось скопировать', error: true }),
+      )
   }, [])
 
   return (
     <div className="app">
-      <Toolbar onExport={handleExport} />
-      <SceneStage stageRef={stageRef} />
-      {error && (
-        <div className="toast" role="alert" onClick={() => setError(null)}>
-          {error}
+      <Toolbar onExport={handleExport} onCopy={handleCopy} />
+      <main className="stage-wrap">
+        <TitleField />
+        <SceneStage stageRef={stageRef} />
+        <NoteField />
+        <StageHint />
+        <Properties />
+        <TextEditor />
+      </main>
+      {toast && (
+        <div className={toast.error ? 'toast toast--error' : 'toast'} role="status" onClick={() => setToast(null)}>
+          {toast.text}
         </div>
       )}
     </div>

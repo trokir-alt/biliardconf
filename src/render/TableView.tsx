@@ -22,7 +22,6 @@ import type { Pocket, TableGeometry } from '../model/table'
 import {
   CUSHION_MM,
   FRAME_LIP_MM,
-  RAIL_BAND_MM,
   TABLE_CORNER_RADIUS_MM,
 } from '../model/table'
 import type { Vec } from '../model/types'
@@ -49,31 +48,17 @@ const SPOT_R_MM = 8
 /** unit vector pointing at the light, i.e. towards the upper left */
 const LIGHT: Vec = { x: -Math.SQRT1_2, y: -Math.SQRT1_2 }
 
-/** pocket walls slide sideways under each cushion so no hairline of felt shows */
-const WALL_BIAS_MM = 2.5
-/** extra depth past the jaw backs before the walls close over */
-const SHELF_EXT_CORNER_MM = 6
-const SHELF_EXT_MIDDLE_MM = 14
-/** the hole itself only follows the first part of each cut face */
-const HOLE_FRAC_CORNER = 0.52
-const HOLE_FRAC_MIDDLE = 0.5
-/** and starts just inside the mouth, so a rim of wall survives all round */
-const HOLE_INSET_MM = 3
 
 /** brass castings live on the wood: between the cloth edge and the outer lip */
-const BRASS_IN_MM = CUSHION_MM + 1
-const BRASS_OUT_MM = RAIL_BAND_MM - 52
+const BRASS_IN_MM = CUSHION_MM + 0.5
+const BRASS_OUT_MM = CUSHION_MM + 38
 /** how far the corner angle piece runs along each rail from the corner */
 const BRASS_ARM_MM = 186
 const BRASS_OUTER_ROUND_MM = 34
-const BRASS_INNER_ROUND_MM = 9
 const SCREW_R_MM = 6
 
 /** middle-pocket plates, laid along the rail on either side of the mouth */
 const PLATE_LEN_MM = 74
-const PLATE_ROUND_MM = 11
-/** gap between the throat edge and the near end of the plate */
-const PLATE_GAP_MM = 9
 
 /** cushion nose: lit edge, dark edge and the shadow it drops on the bed */
 const NOSE_EDGE_MM = 4.5
@@ -114,153 +99,112 @@ const unit = (a: Vec): Vec => {
 /** component of `v` left over once everything along `axis` is removed */
 const reject = (v: Vec, axis: Vec): Vec => unit(sub(v, { x: axis.x * dot(v, axis), y: axis.y * dot(v, axis) }))
 
-/** deterministic 0..1 noise - the view must stay a pure function of `g` */
-function noise(i: number): number {
-  const s = Math.sin(i * 127.1 + 311.7) * 43758.5453
-  return s - Math.floor(s)
-}
 
-const TAU = Math.PI * 2
-const wrap = (a: number): number => ((a % TAU) + TAU) % TAU
-
-/** closed polygon with a rounded corner at every vertex */
-function roundedPath(ctx: Context, pts: Vec[], radii: number[]): void {
-  const n = pts.length
-  const start = mid(pts[0], pts[1])
-  ctx.moveTo(start.x, start.y)
-  for (let i = 1; i <= n; i++) {
-    const cur = pts[i % n]
-    const nxt = pts[(i + 1) % n]
-    ctx.arcTo(cur.x, cur.y, nxt.x, nxt.y, radii[i % n])
-  }
-  ctx.closePath()
-}
 
 /* ------------------------------------------------------------------ pockets */
 
-type Opening = {
-  /** mouth ends, on the play-field boundary */
-  m0: Vec
-  m1: Vec
-  /** where each jaw face stops and the rounded back takes over */
-  t0: Vec
-  t1: Vec
-  /** the back of the opening is an arc about the pocket's nominal point */
-  r: number
-  a0: number
-  a1: number
-  /** true when the arc has to be swept anticlockwise to pass through `out` */
-  ccw: boolean
-}
+/**
+ * How far the visible black opening bulges out of the mouth chord, towards the
+ * rail. It has to stay inside the rubber band (CUSHION_MM): black must never
+ * reach past the outer contour of the cushion, or the pocket reads as a hole
+ * chewed out of the rail instead of a mouth between two jaws.
+ */
+/*
+ * Measured from the mouth chord, not from the pocket point. At a corner the
+ * chord sits 36 mm inside the field corner, so anything under that never
+ * reaches the rubber at all; the band corner is 78 mm out, which is the ceiling.
+ * In the middle the chord is already on the boundary, so the 55 mm of rubber is
+ * the whole budget.
+ */
+const MOUTH_DEPTH_CORNER_MM = 62
+const MOUTH_DEPTH_MIDDLE_MM = 40
+/** chamfer of rubber visible on each jaw face, so the jaw is not a cliff */
+const CHAMFER_MM = 8
+const CHAMFER_LEN_MM = 26
 
 /**
- * The real shape of a pocket opening, built from the jaws rather than from a
- * circle stuck on the rail: the mouth chord between the two noses, the cut face
- * of each cushion, and a rounded back.
+ * Control point of the quadratic that closes a pocket mouth.
  *
- * `faceFrac` says how far down each cut face to travel before rounding over, so
- * the same construction gives both the wide cloth-covered shelf (the whole face)
- * and the modest black hole sunk into it (the first part of it). `side` slides
- * the walls sideways: outwards for the shelf, so the cushion drawn on top hides
- * the seam, inwards for the hole, so a rim of wall survives at the mouth.
+ * A quadratic from j0 to j1 passes through `mid + out * depth` at t = 0.5 when
+ * its control point is `mid + out * 2 * depth`, so this is the whole shape of
+ * the opening: the mouth chord itself, bulged out by `depth`.
  */
-function openingOf(p: Pocket, faceFrac: number, ext: number, side: number): Opening {
-  const ends = ([0, 1] as const).map((i) => {
-    const nose = p.jaws[i]
-    const back = p.jawBacks[i]
-    const dir = p.jawDirs[i]
-    // sideways normal of this cut face, pointing into the cushion it belongs to
-    const nrm = reject(sub(mid(nose, back), p.at), dir)
-    const faceLen = Math.hypot(back.x - nose.x, back.y - nose.y)
-    const m = addv(nose, nrm, side)
-    const t = addv(m, dir, faceLen * faceFrac + ext)
-    return { m, t }
-  })
-  const t0 = ends[0].t
-  const t1 = ends[1].t
-  const r =
-    (Math.hypot(t0.x - p.at.x, t0.y - p.at.y) + Math.hypot(t1.x - p.at.x, t1.y - p.at.y)) / 2
-  const a0 = Math.atan2(t0.y - p.at.y, t0.x - p.at.x)
-  const a1 = Math.atan2(t1.y - p.at.y, t1.x - p.at.x)
-  const aOut = Math.atan2(p.out.y, p.out.x)
-  // sweep whichever way passes through `out`, i.e. around the back of the pocket
-  const ccw = wrap(aOut - a0) > wrap(a1 - a0)
-  return { m0: ends[0].m, m1: ends[1].m, t0, t1, r, a0, a1, ccw }
+function mouthCtrl(p: Pocket, depth: number): Vec {
+  return addv(mid(p.jaws[0], p.jaws[1]), p.out, depth * 2)
 }
 
-function openingPath(ctx: Context, p: Pocket, o: Opening): void {
+function mouthDepth(p: Pocket): number {
+  return p.kind === 'corner' ? MOUTH_DEPTH_CORNER_MM : MOUTH_DEPTH_MIDDLE_MM
+}
+
+/** the mouth as a closed path: chord + bulge, nothing else */
+function mouthPath(ctx: Context, p: Pocket): void {
+  const c = mouthCtrl(p, mouthDepth(p))
   ctx.beginPath()
-  ctx.moveTo(o.m0.x, o.m0.y)
-  ctx.lineTo(o.t0.x, o.t0.y)
-  ctx.arc(p.at.x, p.at.y, o.r, o.a0, o.a1, o.ccw)
-  ctx.lineTo(o.m1.x, o.m1.y)
+  ctx.moveTo(p.jaws[0].x, p.jaws[0].y)
+  ctx.quadraticCurveTo(c.x, c.y, p.jaws[1].x, p.jaws[1].y)
   ctx.closePath()
 }
 
 /**
- * A pocket: cloth-covered walls falling away behind the jaws, and the hole
- * itself sunk into them. Two layers, because a single black patch as wide as
- * the jaw backs is what made the old render look like a sticker.
+ * The pocket opening.
+ *
+ * This is the ONLY black that touches the play field, and it touches it across
+ * exactly the mouth: 72 mm at a corner, 82 mm in the middle. Everything behind
+ * it is covered by the brass casting, which is what a real pocket looks like
+ * from above - the throat does widen with depth, you just cannot see it.
  */
-function PocketThroat({ p, felt }: { p: Pocket; felt: ClothPalette }) {
-  const corner = p.kind === 'corner'
-  const shelf = openingOf(p, 1, corner ? SHELF_EXT_CORNER_MM : SHELF_EXT_MIDDLE_MM, WALL_BIAS_MM)
-  const hole = openingOf(p, corner ? HOLE_FRAC_CORNER : HOLE_FRAC_MIDDLE, 0, -HOLE_INSET_MM)
-  // the walls fall away from the mouth, so they darken with depth, not sideways
-  const rim = addv(p.at, p.out, -CUSHION_MM * 0.8)
-  const deep = addv(p.at, p.out, shelf.r)
+function PocketMouth({ p }: { p: Pocket }) {
+  const d = mouthDepth(p)
+  const c = mid(p.jaws[0], p.jaws[1])
+  return (
+    <Shape
+      sceneFunc={(ctx: Context, shape: KonvaShape) => {
+        mouthPath(ctx, p)
+        ctx.fillStrokeShape(shape)
+      }}
+      // two stops only: every extra gradient layer costs export weight
+      fillLinearGradientStartPoint={c}
+      fillLinearGradientEndPoint={addv(c, p.out, d)}
+      fillLinearGradientColorStops={[0, '#000000', 1, mix(POCKET_THROAT, WOOD.dark, 0.35)]}
+      stroke={rgba(POCKET_THROAT, 0.9)}
+      strokeWidth={1.5}
+    />
+  )
+}
+
+/**
+ * The bevel of rubber along a jaw face. Without it the cushion ends in a cliff
+ * and the jaw reads as a cut rather than as a rounded nose.
+ */
+function JawChamfers({ p, felt }: { p: Pocket; felt: ClothPalette }) {
   return (
     <Group>
-      {/* cloth-covered pocket walls */}
-      <Shape
-        sceneFunc={(ctx: Context, shape: KonvaShape) => {
-          openingPath(ctx, p, shelf)
-          ctx.fillStrokeShape(shape)
-        }}
-        fillLinearGradientStartPoint={rim}
-        fillLinearGradientEndPoint={deep}
-        fillLinearGradientColorStops={[
-          0,
-          felt.cushion,
-          0.2,
-          felt.cushionShade,
-          0.46,
-          mix(felt.cushionShade, POCKET_THROAT, 0.75),
-          1,
-          POCKET_THROAT,
-        ]}
-        stroke={rgba(felt.vignette, 0.85)}
-        strokeWidth={2}
-      />
-      {/* brass lip where the walls meet the casting at the back of the opening */}
-      <Shape
-        sceneFunc={(ctx: Context, shape: KonvaShape) => {
-          ctx.beginPath()
-          ctx.arc(p.at.x, p.at.y, shelf.r - 1, shelf.a0, shelf.a1, shelf.ccw)
-          ctx.fillStrokeShape(shape)
-        }}
-        stroke={rgba(METAL.mid, 0.22)}
-        strokeWidth={2}
-      />
-      {/* the hole, with the far wall barely catching the light */}
-      <Shape
-        sceneFunc={(ctx: Context, shape: KonvaShape) => {
-          openingPath(ctx, p, hole)
-          ctx.fillStrokeShape(shape)
-        }}
-        fillLinearGradientStartPoint={addv(p.at, LIGHT, hole.r)}
-        fillLinearGradientEndPoint={addv(p.at, LIGHT, -hole.r)}
-        fillLinearGradientColorStops={[
-          0,
-          '#000000',
-          0.6,
-          POCKET_THROAT,
-          1,
-          mix(POCKET_THROAT, WOOD.mid, 0.3),
-        ]}
-        shadowColor={rgba(felt.vignette, 0.75)}
-        shadowBlur={7}
-      />
+      {([0, 1] as const).map((i) => {
+        const nose = p.jaws[i]
+        const dir = p.jawDirs[i]
+        // sideways, into the cushion this jaw belongs to
+        const nrm = unit(reject(sub(mid(p.jaws[0], p.jaws[1]), nose), dir))
+        const a = addv(nose, dir, 2)
+        const b = addv(a, dir, CHAMFER_LEN_MM)
+        return (
+          <Line
+            key={i}
+            points={[
+              a.x,
+              a.y,
+              b.x,
+              b.y,
+              b.x - nrm.x * CHAMFER_MM,
+              b.y - nrm.y * CHAMFER_MM,
+              a.x - nrm.x * CHAMFER_MM,
+              a.y - nrm.y * CHAMFER_MM,
+            ]}
+            closed
+            fill={shift(felt.cushion, 0.14)}
+          />
+        )
+      })}
     </Group>
   )
 }
@@ -309,9 +253,15 @@ function Screw({ at }: { at: Vec }) {
 }
 
 /**
- * Corner casting: one L-shaped angle piece hugging both rails, its inner step
- * sitting exactly where the cloth ends and its outer edge stopping short of the
- * lighter lip that runs round the table.
+ * Corner casting: a narrow L-shaped angle piece hugging both rails, whose inner
+ * edge follows the contour of the mouth.
+ *
+ * That inner edge is the point of the whole thing. The throat really does flare
+ * out to ~206 mm between the jaw backs - two rails meeting at a right angle can
+ * do nothing else - and if the brass stops short of it, all of that flare
+ * renders as black and the corner reads as a hole rather than a pocket. So the
+ * casting runs right up to the jaw faces and closes across the mouth on the
+ * same quadratic the opening is drawn with.
  */
 function CornerCasting({ p }: { p: Pocket }) {
   // the two rail directions leaving this corner
@@ -324,103 +274,134 @@ function CornerCasting({ p }: { p: Pocket }) {
   const i = BRASS_IN_MM
   const o = BRASS_OUT_MM
   const n = BRASS_ARM_MM
-  const pts = [at(n, -i), at(n, -o), at(-o, -o), at(-o, n), at(-i, n), at(-i, -i)]
-  const radii = [
-    BRASS_INNER_ROUND_MM,
-    BRASS_INNER_ROUND_MM,
-    BRASS_OUTER_ROUND_MM,
-    BRASS_INNER_ROUND_MM,
-    BRASS_INNER_ROUND_MM,
-    BRASS_INNER_ROUND_MM,
-  ]
+  const b0 = p.jawBacks[0]
+  const b1 = p.jawBacks[1]
+  const ctrl = mouthCtrl(p, mouthDepth(p))
   const mid2 = (i + o) / 2
-  const screws = [at(n - 42, -mid2), at(-mid2, n - 42), at(-o * 0.7, -o * 0.7)]
+  const screws = [at(n - 40, -mid2), at(-mid2, n - 40), at(-mid2 * 0.9, -mid2 * 0.9)]
   return (
     <Group>
       <Shape
         sceneFunc={(ctx: Context, shape: KonvaShape) => {
           ctx.beginPath()
-          roundedPath(ctx, pts, radii)
+          ctx.moveTo(at(n, -i).x, at(n, -i).y)
+          // inner edge: along the back of cushion A, down its jaw face, across
+          // the mouth, then back out the mirror image on rail B
+          ctx.lineTo(b0.x, b0.y)
+          ctx.lineTo(p.jaws[0].x, p.jaws[0].y)
+          ctx.quadraticCurveTo(ctrl.x, ctrl.y, p.jaws[1].x, p.jaws[1].y)
+          ctx.lineTo(b1.x, b1.y)
+          ctx.lineTo(at(-i, n).x, at(-i, n).y)
+          // outer edge, with the table's own rounded corner
+          ctx.lineTo(at(-o, n).x, at(-o, n).y)
+          ctx.arcTo(at(-o, -o).x, at(-o, -o).y, at(n, -o).x, at(n, -o).y, BRASS_OUTER_ROUND_MM)
+          ctx.lineTo(at(n, -o).x, at(n, -o).y)
+          ctx.closePath()
           ctx.fillStrokeShape(shape)
         }}
-        {...metalStops(LIGHT, BRASS_ARM_MM * 0.55, at(-o * 0.4, -o * 0.4))}
+        {...metalStops(LIGHT, BRASS_ARM_MM * 0.55, at(-mid2, -mid2))}
         stroke={rgba(METAL.dark, 0.85)}
-        strokeWidth={1.8}
-        shadowColor={rgba(WOOD.edgeShadow, 0.55)}
-        shadowBlur={7}
-        shadowOffsetX={2}
-        shadowOffsetY={2}
+        strokeWidth={1.6}
       />
-      {/* bright bevel along the two inner steps, where the light rakes across */}
-      <Line
-        points={[at(n - 6, -i).x, at(n - 6, -i).y, at(-i, -i).x, at(-i, -i).y, at(-i, n - 6).x, at(-i, n - 6).y]}
-        stroke={rgba(METAL.light, 0.55)}
-        strokeWidth={2.4}
-        lineJoin="round"
+      {/* the inner edge is a lip: a dark line hugging the mouth and jaw faces,
+          with a lit bevel just outside it, so the casting reads as a rim round
+          the opening and not as a flat plate */}
+      <Shape
+        sceneFunc={(ctx: Context, shape: KonvaShape) => {
+          ctx.beginPath()
+          ctx.moveTo(at(n - 8, -i).x, at(n - 8, -i).y)
+          ctx.lineTo(b0.x, b0.y)
+          ctx.lineTo(p.jaws[0].x, p.jaws[0].y)
+          ctx.quadraticCurveTo(ctrl.x, ctrl.y, p.jaws[1].x, p.jaws[1].y)
+          ctx.lineTo(b1.x, b1.y)
+          ctx.lineTo(at(-i, n - 8).x, at(-i, n - 8).y)
+          ctx.strokeShape(shape)
+        }}
+        stroke={rgba(METAL.dark, 0.7)}
+        strokeWidth={3}
         lineCap="round"
+        lineJoin="round"
       />
-      {screws.map((s, k) => (
-        <Screw key={k} at={s} />
+      <Line
+        points={[at(n - 8, -i - 4).x, at(n - 8, -i - 4).y, at(-i - 4, -i - 4).x, at(-i - 4, -i - 4).y, at(-i - 4, n - 8).x, at(-i - 4, n - 8).y]}
+        stroke={rgba(METAL.light, 0.4)}
+        strokeWidth={2}
+        lineCap="round"
+        lineJoin="round"
+      />
+      {screws.map((sc, k) => (
+        <Screw key={k} at={sc} />
       ))}
     </Group>
   )
 }
 
-/** Middle casting: a small plate lying along the rail on each side of the mouth. */
+/**
+ * Middle casting: a plate along the rail on each side of the mouth, joined
+ * behind it. The join is not decoration - it is what stops the throat's flare
+ * from showing as black between the two plates.
+ */
 function MiddleCasting({ p }: { p: Pocket }) {
-  const th = openingOf(p, 1, SHELF_EXT_MIDDLE_MM, WALL_BIAS_MM)
   const tan: Vec = { x: -p.out.y, y: p.out.x }
-  const i = BRASS_IN_MM
-  const o = BRASS_OUT_MM
-  // half-width of the opening where it leaves the cushion, so the plate can hug it
-  const half = Math.sqrt(Math.max(th.r * th.r - i * i, 1))
-  const near = half + PLATE_GAP_MM
   const at = (s: number, d: number): Vec => ({
     x: p.at.x + tan.x * s + p.out.x * d,
     y: p.at.y + tan.y * s + p.out.y * d,
   })
-  const plate = (sign: number) => {
-    const s0 = near * sign
-    const s1 = (near + PLATE_LEN_MM) * sign
-    const pts = [at(s0, i + 10), at(s1, i + 10), at(s1, o - 12), at(s0, o - 12)]
-    const radii = [PLATE_ROUND_MM, PLATE_ROUND_MM, PLATE_ROUND_MM, PLATE_ROUND_MM]
-    const c = at((near + PLATE_LEN_MM / 2) * sign, (i + o) / 2)
-    return {
-      pts,
-      radii,
-      c,
-      screws: [
-        at((near + 17) * sign, (i + o) / 2 + 2),
-        at((near + PLATE_LEN_MM - 17) * sign, (i + o) / 2 + 2),
-      ],
-    }
-  }
+  const i = BRASS_IN_MM
+  const o = BRASS_OUT_MM
+  const half = p.mouthMm / 2
+  const span = half + PLATE_LEN_MM
+  const ctrl = mouthCtrl(p, mouthDepth(p))
+  const mid2 = (i + o) / 2
+  const screws = [-1, 1].flatMap((sg) => [
+    at((half + 20) * sg, mid2),
+    at((span - 18) * sg, mid2),
+  ])
   return (
     <Group>
-      {[-1, 1].map((sign) => {
-        const pl = plate(sign)
-        return (
-          <Group key={sign}>
-            <Shape
-              sceneFunc={(ctx: Context, shape: KonvaShape) => {
-                ctx.beginPath()
-                roundedPath(ctx, pl.pts, pl.radii)
-                ctx.fillStrokeShape(shape)
-              }}
-              {...metalStops(LIGHT, PLATE_LEN_MM * 0.5, pl.c)}
-              stroke={rgba(METAL.dark, 0.85)}
-              strokeWidth={1.8}
-              shadowColor={rgba(WOOD.edgeShadow, 0.55)}
-              shadowBlur={6}
-              shadowOffsetX={2}
-              shadowOffsetY={2}
-            />
-            {pl.screws.map((s, k) => (
-              <Screw key={k} at={s} />
-            ))}
-          </Group>
-        )
-      })}
+      <Shape
+        sceneFunc={(ctx: Context, shape: KonvaShape) => {
+          ctx.beginPath()
+          ctx.moveTo(at(-span, i).x, at(-span, i).y)
+          ctx.lineTo(p.jawBacks[0].x, p.jawBacks[0].y)
+          ctx.lineTo(p.jaws[0].x, p.jaws[0].y)
+          ctx.quadraticCurveTo(ctrl.x, ctrl.y, p.jaws[1].x, p.jaws[1].y)
+          ctx.lineTo(p.jawBacks[1].x, p.jawBacks[1].y)
+          ctx.lineTo(at(span, i).x, at(span, i).y)
+          ctx.lineTo(at(span, o).x, at(span, o).y)
+          ctx.lineTo(at(-span, o).x, at(-span, o).y)
+          ctx.closePath()
+          ctx.fillStrokeShape(shape)
+        }}
+        {...metalStops(LIGHT, span, at(0, mid2))}
+        stroke={rgba(METAL.dark, 0.85)}
+        strokeWidth={1.6}
+      />
+      <Shape
+        sceneFunc={(ctx: Context, shape: KonvaShape) => {
+          ctx.beginPath()
+          ctx.moveTo(at(-span + 8, i).x, at(-span + 8, i).y)
+          ctx.lineTo(p.jawBacks[0].x, p.jawBacks[0].y)
+          ctx.lineTo(p.jaws[0].x, p.jaws[0].y)
+          ctx.quadraticCurveTo(ctrl.x, ctrl.y, p.jaws[1].x, p.jaws[1].y)
+          ctx.lineTo(p.jawBacks[1].x, p.jawBacks[1].y)
+          ctx.lineTo(at(span - 8, i).x, at(span - 8, i).y)
+          ctx.strokeShape(shape)
+        }}
+        stroke={rgba(METAL.dark, 0.7)}
+        strokeWidth={3}
+        lineCap="round"
+        lineJoin="round"
+      />
+      {/* the seam between the two plates, right behind the mouth */}
+      <Line
+        points={[at(0, mouthDepth(p) + 6).x, at(0, mouthDepth(p) + 6).y, at(0, o - 4).x, at(0, o - 4).y]}
+        stroke={rgba(METAL.dark, 0.5)}
+        strokeWidth={1.6}
+      />
+      {screws.map((sc, k) => (
+        <Screw key={k} at={sc} />
+      ))}
     </Group>
   )
 }
@@ -533,39 +514,6 @@ function CushionShadow({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
 
 /* --------------------------------------------------------------------- wood */
 
-/** very low contrast grain running the length of each rail */
-function WoodGrain({ g }: { g: TableGeometry }) {
-  const x0 = g.outerX
-  const y0 = g.outerY
-  const x1 = x0 + g.outerWidthMm
-  const y1 = y0 + g.outerHeightMm
-  const lines = 24
-  return (
-    <Shape
-      sceneFunc={(ctx: Context, shape: KonvaShape) => {
-        ctx.beginPath()
-        // each rail keeps its own grain direction, mitred at the corners
-        for (let i = 0; i < lines; i++) {
-          const f = (i + 0.5) / lines
-          const off = 6 + f * (RAIL_BAND_MM - 12)
-          const j = (noise(i) - 0.5) * 6
-          const k = (noise(i + 41) - 0.5) * 6
-          ctx.moveTo(x0 + off, y0 + off + j)
-          ctx.lineTo(x1 - off, y0 + off + k)
-          ctx.moveTo(x0 + off, y1 - off + j)
-          ctx.lineTo(x1 - off, y1 - off + k)
-          ctx.moveTo(x0 + off + j, y0 + off)
-          ctx.lineTo(x0 + off + k, y1 - off)
-          ctx.moveTo(x1 - off + j, y0 + off)
-          ctx.lineTo(x1 - off + k, y1 - off)
-        }
-        ctx.fillStrokeShape(shape)
-      }}
-      stroke={rgba(WOOD.edgeShadow, 0.05)}
-      strokeWidth={1.4}
-    />
-  )
-}
 
 /* --------------------------------------------------------------------- view */
 
@@ -632,8 +580,6 @@ export function TableView({ g }: { g: TableGeometry }): JSX.Element {
         stroke={rgba(WOOD.edgeShadow, 0.5)}
         strokeWidth={2}
       />
-
-      <WoodGrain g={g} />
 
       {/* 3. varnish sheen: a single broad diagonal band, nothing more */}
       <Rect
@@ -721,27 +667,6 @@ export function TableView({ g }: { g: TableGeometry }): JSX.Element {
         ]}
       />
 
-      {/* 6b. the lamp itself, an off-centre bloom towards the upper left */}
-      <Rect
-        x={cx}
-        y={cy}
-        width={cw}
-        height={ch}
-        cornerRadius={CLOTH_CORNER_MM}
-        fillRadialGradientStartPoint={{ x: cx + cw * 0.42, y: cy + ch * 0.4 }}
-        fillRadialGradientStartRadius={0}
-        fillRadialGradientEndPoint={{ x: cx + cw * 0.42, y: cy + ch * 0.4 }}
-        fillRadialGradientEndRadius={ch * 0.8}
-        fillRadialGradientColorStops={[
-          0,
-          'rgba(255,255,255,0.055)',
-          0.6,
-          'rgba(255,255,255,0.016)',
-          1,
-          'rgba(255,255,255,0)',
-        ]}
-      />
-
       {/* 7. house line, quarter / half / three-quarter lines and the spots */}
       {g.cfg.markings && (
         <Group>
@@ -771,9 +696,9 @@ export function TableView({ g }: { g: TableGeometry }): JSX.Element {
         p.kind === 'corner' ? <CornerCasting key={p.id} p={p} /> : <MiddleCasting key={p.id} p={p} />,
       )}
 
-      {/* 9. pocket openings, shaped by the jaws */}
+      {/* 9. the pocket mouths - the only black that touches the bed */}
       {g.pockets.map((p) => (
-        <PocketThroat key={p.id} p={p} felt={felt} />
+        <PocketMouth key={p.id} p={p} />
       ))}
 
       {/* 10. the cushion band: the step between the wood and the bed */}
@@ -782,6 +707,11 @@ export function TableView({ g }: { g: TableGeometry }): JSX.Element {
       ))}
       {g.cushions.map((poly, i) => (
         <CushionShadow key={i} poly={poly} felt={felt} />
+      ))}
+
+      {/* 11. the rubber bevel on each jaw, so a jaw is a nose and not a cliff */}
+      {g.pockets.map((p) => (
+        <JawChamfers key={p.id} p={p} felt={felt} />
       ))}
     </Group>
   )
