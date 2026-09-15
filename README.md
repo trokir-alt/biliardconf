@@ -27,8 +27,26 @@ npm run build    # tsc -b && vite build -> dist/
 npm run preview
 ```
 
-Деплой: Netlify, статика из `dist`, конфиг в `netlify.toml` (Node 20,
-SPA-редирект на `index.html`).
+## Деплой
+
+Netlify, статика из `dist`, конфиг в `netlify.toml` (Node 20, SPA-редирект на
+`index.html`). Проект на Netlify уже создан: **biliardconf** →
+https://biliardconf.netlify.app
+
+Любой из двух способов:
+
+1. Подключить репозиторий к проекту в Netlify (Site configuration → Build &
+   deploy → Link repository). `netlify.toml` уже лежит в корне, так что
+   команду сборки и папку публикации указывать не нужно — дальше каждый push
+   в ветку деплоится сам.
+2. Разово, из корня репозитория:
+
+   ```bash
+   npx netlify-cli deploy --prod --dir=dist --site=biliardconf
+   ```
+
+Vite 8 требует Node не ниже 20.19 — это записано в `engines` в `package.json`,
+чтобы неверная версия падала с понятным сообщением.
 
 ## Архитектура
 

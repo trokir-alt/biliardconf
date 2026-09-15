@@ -3,6 +3,9 @@
   publish = "dist"
 
 [build.environment]
+  # Node 20 per the spec. Vite 8 needs >= 20.19, which "20" resolves to on
+  # Netlify; package.json declares the same range so a wrong runtime fails
+  # with a clear message instead of a confusing build error.
   NODE_VERSION = "20"
 
 # single page app: everything falls back to the entry document
