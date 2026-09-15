@@ -106,15 +106,40 @@ export type TextItem = ItemBase & {
 
 /* ---------------------------------------------------------------- stage 3 */
 
-export type StrikePower = 1 | 2 | 3 | 4 | 5
-
-export type StrikeItem = ItemBase & {
-  type: 'strike'
+/**
+ * The cue ball seen from behind, with the contact point on it. `dot` is in the
+ * unit circle, u right+, v down+, and never further out than 0.9 - a real cue
+ * tip that far out miscues.
+ */
+export type StrikePointItem = ItemBase & {
+  type: 'strikePoint'
   x: number
   y: number
-  /** contact point inside the unit circle, u right+, v down+ */
-  spot: { u: number; v: number }
-  power: StrikePower
+  /** diameter in table mm, 200..500 */
+  sizeMm: number
+  dot: { u: number; v: number }
+}
+
+/** the nine values the strength scale can take; nothing in between */
+export const POWER_VALUES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5] as const
+export type PowerValue = (typeof POWER_VALUES)[number]
+
+export type PowerItem = ItemBase & {
+  type: 'power'
+  x: number
+  y: number
+  value: PowerValue
+}
+
+/**
+ * A wireframe ball, the table's own diameter: where a ball should BE at the
+ * moment of contact. It deliberately takes no part in the push-apart, because
+ * touching another ball is its whole purpose.
+ */
+export type GhostBallItem = ItemBase & {
+  type: 'ghostBall'
+  x: number
+  y: number
 }
 
 /* ------------------------------------------------------------------ union */
@@ -126,7 +151,9 @@ export type Item =
   | ZoneItem
   | LineItem
   | TextItem
-  | StrikeItem
+  | StrikePointItem
+  | PowerItem
+  | GhostBallItem
 
 export type ItemType = Item['type']
 

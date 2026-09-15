@@ -88,7 +88,9 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   /* Inspection hook for the browser test suite; a no-op in a normal build. */
   useEffect(() => {
     publishDebug('__layout', layout)
-  }, [layout])
+    // the very nodes the export renders, so a test can read a caption's text
+    publishDebug('__stage', stageRef.current)
+  }, [layout, stageRef])
 
   useEffect(() => {
     publishDebug('__store', useStore)
@@ -140,6 +142,18 @@ export function SceneStage({ stageRef }: SceneStageProps) {
         const from = snapPt(p)
         dragging.current = true
         setDraft({ tool: st.tool, from, to: from })
+        return
+      }
+      if (st.tool === 'strike' || st.tool === 'power' || st.tool === 'ghost-ball') {
+        const id = newId(st.tool)
+        const item: Item =
+          st.tool === 'strike'
+            ? { id, type: 'strikePoint', x: p.x, y: p.y, sizeMm: 300, dot: { u: 0, v: 0 } }
+            : st.tool === 'power'
+              ? { id, type: 'power', x: p.x, y: p.y, value: 2.5 }
+              : { id, type: 'ghostBall', x: p.x, y: p.y }
+        // widgets sit above the balls and arrows, below the captions
+        st.addItem(item, st.tool === 'ghost-ball' ? 'top' : 'belowText')
         return
       }
       if (st.tool === 'text') {
@@ -235,7 +249,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
             }
         }
         // a zone belongs under the balls, never over them
-        st.addItem(item, isZone)
+        st.addItem(item, isZone ? 'bottom' : 'top')
         return null
       })
     },
@@ -283,6 +297,12 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   const handleDragMove = useCallback(
     (e: KonvaEventObject<DragEvent>) => {
       const node = e.target
+      if (node.name() === 'ghostBall') {
+        useStore.getState().dragGhostBallTo(node.id(), { x: node.x(), y: node.y() })
+        const it = useStore.getState().scene.items.find((i) => i.id === node.id())
+        if (it && it.type === 'ghostBall') node.position({ x: it.x, y: it.y })
+        return
+      }
       if (node.name() !== 'ball') return // other items just ride the group offset
       const p = settleBall(node.id(), { x: node.x(), y: node.y() })
       node.position(p)
@@ -295,6 +315,12 @@ export function SceneStage({ stageRef }: SceneStageProps) {
     (e: KonvaEventObject<DragEvent>) => {
       const node = e.target
       const st = useStore.getState()
+      if (node.name() === 'ghostBall') {
+        st.dragGhostBallTo(node.id(), { x: node.x(), y: node.y() })
+        const it = st.scene.items.find((i) => i.id === node.id())
+        if (it && it.type === 'ghostBall') node.position({ x: it.x, y: it.y })
+        return
+      }
       if (node.name() === 'ball') {
         const p = settleBall(node.id(), { x: node.x(), y: node.y() })
         node.position(p)
@@ -403,6 +429,15 @@ export function SceneStage({ stageRef }: SceneStageProps) {
         st.select(null)
         st.setTool('select')
         return
+      }
+      // strength plate: plus and minus step the scale
+      if (st.selectedId && (e.key === '+' || e.key === '=' || e.key === '-' || e.key === '_')) {
+        const it = st.scene.items.find((i) => i.id === st.selectedId)
+        if (it?.type === 'power') {
+          e.preventDefault()
+          st.adjustPower(it.id, e.key === '+' || e.key === '=' ? 1 : -1)
+          return
+        }
       }
       // precise nudge: 5 mm, or 1 mm with shift (spec section 7)
       const step = e.shiftKey ? 1 : 5
@@ -536,7 +571,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
                 />
               </Group>
             )}
-            {selecting && selected && selected.type !== 'ball' && (
+            {selecting && selected && selected.type !== 'ball' && selected.type !== 'ghostBall' && (
               <Handles
                 item={selected}
                 scale={layout.scale}
@@ -565,6 +600,8 @@ export function StageHint() {
   if (tool === 'ball-white' || tool === 'ball-cue')
     return <p className="stage-wrap__hint">Нажмите на стол, чтобы поставить шар.</p>
   if (tool === 'text') return <p className="stage-wrap__hint">Нажмите на стол, чтобы поставить подпись.</p>
+  if (tool === 'strike' || tool === 'power' || tool === 'ghost-ball')
+    return <p className="stage-wrap__hint">Нажмите на стол, чтобы поставить виджет. Потом его можно тянуть.</p>
   return (
     <p className="stage-wrap__hint">
       Нажмите и протяните по столу. Инструмент остаётся активным, Esc - выход.

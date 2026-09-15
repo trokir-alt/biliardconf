@@ -182,6 +182,36 @@ export function freeSpot(
   return start
 }
 
+/* ------------------------------------------------------------------ touch */
+
+/** within this, a wireframe ball snaps to exactly touching a real one */
+export const TOUCH_SNAP_MM = 16
+
+/**
+ * Magnet to contact: if `p` is nearly one diameter from some ball, move it to
+ * exactly one diameter along the same direction. This is what makes the
+ * wireframe ball useful - a coach wants "here is where the balls meet", and
+ * that is a distance of D to the millimetre, not roughly.
+ */
+export function snapTouch(items: Item[], selfId: string | null, p: Vec, ballMm: number): Vec {
+  let best: Vec | null = null
+  let bestErr = TOUCH_SNAP_MM
+  for (const it of items) {
+    if (it.id === selfId) continue
+    if (it.type !== 'ball' && it.type !== 'ghostBall') continue
+    const dx = p.x - it.x
+    const dy = p.y - it.y
+    const d = Math.hypot(dx, dy)
+    if (d < 1e-6) continue
+    const err = Math.abs(d - ballMm)
+    if (err < bestErr) {
+      bestErr = err
+      best = { x: it.x + (dx / d) * ballMm, y: it.y + (dy / d) * ballMm }
+    }
+  }
+  return best ?? p
+}
+
 /* ---------------------------------------------------------------- pyramid */
 
 /**

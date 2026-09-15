@@ -36,9 +36,24 @@ export const FRAME_LIP_MM = 28
 export const CORNER_MOUTH_MM = 72
 export const MIDDLE_MOUTH_MM = 82
 
-/** how far the back of a cushion retreats from its nose at a pocket jaw */
-export const CORNER_JAW_MM = 40
-export const MIDDLE_JAW_MM = 26
+/**
+ * How the back of a cushion sits relative to its nose at a pocket. Negative:
+ * the rubber overhangs TOWARDS the hole, so its rounded end lies over the rim
+ * ring the way it does on a broadcast table, instead of flaring away and
+ * leaving a wedge of cloth beside the pocket.
+ */
+export const CORNER_JAW_MM = -14
+/** the middle ring lies over the rubber ends, so they can simply be square */
+export const MIDDLE_JAW_MM = 0
+
+/**
+ * The pocket is a round hole with a light rim, as on TV. The radius is chosen
+ * so the chord through the two cushion noses is exactly the mouth - 72 or 82 mm
+ * - and the black stays inside the rubber band on the corner diagonal.
+ */
+export const CORNER_HOLE_R_MM = 52
+export const MIDDLE_HOLE_R_MM = 50
+export const RIM_MM = 14
 
 /** rounding of the outer wooden frame */
 export const TABLE_CORNER_RADIUS_MM = 120
@@ -63,6 +78,8 @@ export type Pocket = {
   jawBacks: [Vec, Vec]
   /** unit direction of each jaw face, nose -> back */
   jawDirs: [Vec, Vec]
+  /** the round hole: centre and radius; its chord through `jaws` is the mouth */
+  hole: { c: Vec; r: number }
 }
 
 /** flat [x0,y0,x1,y1,...] polygon in mm */
@@ -138,16 +155,25 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
     mouthMm: number,
     a: ReturnType<typeof jaw>,
     b: ReturnType<typeof jaw>,
-  ): Pocket => ({
-    id,
-    kind,
-    at,
-    out,
-    mouthMm,
-    jaws: [a.nose, b.nose],
-    jawBacks: [a.back, b.back],
-    jawDirs: [a.dir, b.dir],
-  })
+  ): Pocket => {
+    // a circle of radius r through both noses: its centre is on the pocket's
+    // out-axis, sqrt(r^2 - (mouth/2)^2) behind the midpoint of the mouth chord
+    const r = kind === 'corner' ? CORNER_HOLE_R_MM : MIDDLE_HOLE_R_MM
+    const mx = (a.nose.x + b.nose.x) / 2
+    const my = (a.nose.y + b.nose.y) / 2
+    const back = Math.sqrt(Math.max(0, r * r - (mouthMm / 2) * (mouthMm / 2)))
+    return {
+      id,
+      kind,
+      at,
+      out,
+      mouthMm,
+      jaws: [a.nose, b.nose],
+      jawBacks: [a.back, b.back],
+      jawDirs: [a.dir, b.dir],
+      hole: { c: v(mx + out.x * back, my + out.y * back), r },
+    }
+  }
 
   const pockets: Pocket[] = [
     pocket(

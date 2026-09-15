@@ -17,12 +17,14 @@ import type {
   ClothColor,
   Item,
   Orientation,
+  PowerValue,
   Scene,
   StrokeStyle,
   Vec,
 } from '../model/types'
+import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE, buildGeometry, clampToField } from '../model/table'
-import { translateItem } from '../model/item'
+import { STRIKE_MAX_MM, STRIKE_MIN_MM, translateItem } from '../model/item'
 import {
   DEFAULT_HEAD,
   DEFAULT_INK,
@@ -33,7 +35,7 @@ import {
   GHOST_MIN,
   ghostCount,
 } from '../model/style'
-import { freeSpot, housePoint, newId, pyramidBalls, resolveOverlap, snapPoint } from '../lib/place'
+import { freeSpot, housePoint, newId, pyramidBalls, resolveOverlap, snapPoint, snapTouch } from '../lib/place'
 import { loadScene } from '../lib/storage'
 
 export const HISTORY_LIMIT = 50
@@ -49,6 +51,12 @@ export type Tool =
   | 'zone-ellipse'
   | 'line'
   | 'text'
+  | 'strike'
+  | 'power'
+  | 'ghost-ball'
+
+/** where a new object lands in the z-order */
+export type Placement = 'top' | 'bottom' | 'belowText'
 
 /** tools that are drawn with one press-drag-release gesture */
 export const DRAG_TOOLS: Tool[] = ['arrow', 'ghost', 'zone-rect', 'zone-ellipse', 'line']
@@ -96,8 +104,14 @@ export type AppState = {
 
   /* ---- editing ---- */
   addBall: (kind: BallKind, at?: Vec) => void
-  /** a zone always lands at the bottom: it belongs under the balls, not over */
-  addItem: (item: Item, atBottom?: boolean) => void
+  /** a zone lands at the bottom, a widget just under the captions */
+  addItem: (item: Item, placement?: Placement) => void
+  /** wireframe ball: clamp and contact-snap, never push-apart */
+  dragGhostBallTo: (id: string, at: Vec) => void
+  setPower: (id: string, value: PowerValue) => void
+  adjustPower: (id: string, steps: number) => void
+  resetDot: (id: string) => void
+  setStrikeSize: (id: string, mm: number) => void
   /** one history entry; for property changes and finished edits */
   updateItem: (id: string, patch: Partial<Item>) => void
   /** no history entry; for the frames of a drag */
@@ -262,12 +276,47 @@ export const useStore = create<AppState>()(
         })
       },
 
-      addItem: (item, atBottom = false) =>
+      addItem: (item, placement = 'top') =>
         edit((s) => {
-          if (atBottom) s.scene.items.unshift(item)
-          else s.scene.items.push(item)
+          if (placement === 'bottom') s.scene.items.unshift(item)
+          else if (placement === 'belowText') {
+            // above balls and arrows, below captions
+            const i = s.scene.items.findIndex((it) => it.type === 'text')
+            if (i === -1) s.scene.items.push(item)
+            else s.scene.items.splice(i, 0, item)
+          } else s.scene.items.push(item)
           s.selectedId = item.id
         }),
+
+      dragGhostBallTo: (id, at) => {
+        const g = geom()
+        const { scene, snap } = get()
+        const ballMm = scene.table.ballMm
+        let p = clampToField(g, at, ballMm)
+        p = snapTouch(scene.items, id, p, ballMm)
+        if (snap) p = clampToField(g, snapPoint(g, p, true), ballMm)
+        set((s) => patchItem(s, id, { x: p.x, y: p.y } as Partial<Item>))
+      },
+
+      setPower: (id, value) => {
+        if (!(POWER_VALUES as readonly number[]).includes(value)) return
+        get().updateItem(id, { value } as Partial<Item>)
+      },
+
+      adjustPower: (id, steps) => {
+        const item = get().scene.items.find((i) => i.id === id)
+        if (!item || item.type !== 'power') return
+        const i = POWER_VALUES.indexOf(item.value)
+        const j = Math.min(POWER_VALUES.length - 1, Math.max(0, i + steps))
+        if (j !== i) get().updateItem(id, { value: POWER_VALUES[j] } as Partial<Item>)
+      },
+
+      resetDot: (id) => get().updateItem(id, { dot: { u: 0, v: 0 } } as Partial<Item>),
+
+      setStrikeSize: (id, mm) =>
+        get().updateItem(id, {
+          sizeMm: Math.round(Math.min(STRIKE_MAX_MM, Math.max(STRIKE_MIN_MM, mm))),
+        } as Partial<Item>),
 
       updateItem: (id, patch) => edit((s) => patchItem(s, id, patch)),
       updateItemLive: (id, patch) => set((s) => patchItem(s, id, patch)),

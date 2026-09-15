@@ -157,18 +157,23 @@ async function behaviour(page, label) {
     if (!made) continue
 
     // the tool is sticky: a second gesture makes a second object
+    const idsBefore = sc.items.map((i) => i.id)
     await gesture(page, { x: sp.from.x + 50, y: sp.from.y + 50 }, { x: sp.to.x + 50, y: sp.to.y + 50 })
     sc = await scene(page)
     check(`${label}: ${sp.name} tool stays active`, sc.items.filter((i) => i.type === sp.type).length >= 2)
-    // drop the second one: its hit band overlaps the first and would make the
-    // later click-to-select ambiguous
-    await page.evaluate((keep) => {
-      const st = window.__store.getState()
-      const extra = st.scene.items.filter((i) => i.type !== 'ball' && i.id !== keep).at(-1)
-      if (extra) { st.select(extra.id); st.removeSelected() }
-    }, made.id)
+    // drop that second one by identity - its hit band overlaps the first and
+    // would make the later click-to-select ambiguous. (Zones are inserted at
+    // the bottom, so "the last item" would be the wrong object.)
+    const extra = sc.items.find((i) => !idsBefore.includes(i.id))
+    if (extra) {
+      await page.evaluate((id) => {
+        const st = window.__store.getState()
+        st.select(id)
+        st.removeSelected()
+      }, extra.id)
+    }
     // and a tap without a drag makes nothing
-    const n0 = sc.items.length
+    const n0 = (await scene(page)).items.length
     const [tx, ty] = await toPage(page, 1775, 1500)
     await page.mouse.click(tx, ty)
     await page.waitForTimeout(120)
@@ -249,16 +254,33 @@ async function behaviour(page, label) {
   check(`${label}: colour swatch recolours the selection`, (await scene(page)).items.find((i) => i.id === arrow.id).color === '#FF5A4E')
 
   // ---- ghost count: auto from length, manual +/- ----
-  const ghost = (await scene(page)).items.find((i) => i.type === 'ghostTrail')
+  let ghost = (await scene(page)).items.find((i) => i.type === 'ghostTrail')
+  if (!ghost) {
+    // should not happen after the undo above; make it a failure, not a crash
+    check(`${label}: a ghost trail is still on the table for the count checks`, false)
+    await tool(page, 'Траектория')
+    await gesture(page, { x: 700, y: 1300 }, { x: 1600, y: 700 })
+    await tool(page, 'Выбор')
+    ghost = (await scene(page)).items.find((i) => i.type === 'ghostTrail')
+  }
   const len = Math.hypot(ghost.to.x - ghost.from.x, ghost.to.y - ghost.from.y)
   const expect = Math.min(8, Math.max(3, Math.round(len / (1.6 * d))))
   check(`${label}: ghost count follows round(len / 1.6d)`, ghost.count === expect, `${ghost.count} vs ${expect} for ${len.toFixed(0)} mm`)
+  // the arrow is still selected and its floating panel may sit over the trail:
+  // drop the selection first, as a person would click away
+  await page.evaluate(() => window.__store.getState().select(null))
+  await page.waitForTimeout(80)
   const [gx, gy] = await toPage(page, ghost.from.x, ghost.from.y)
   await page.mouse.click(gx, gy)
   await page.waitForTimeout(120)
-  await page.getByRole('button', { name: 'Больше' }).click()
+  check(`${label}: clicking a trail selects it`, (await scene(page)).selectedId === ghost.id)
+  // step in whichever direction the range allows: at 8 only "-" is enabled
+  const up = ghost.count < 8
+  await page.getByRole('button', { name: up ? 'Больше' : 'Меньше' }).click()
   await page.waitForTimeout(100)
-  check(`${label}: ghost + adds a ball and pins the count`, (await scene(page)).items.find((i) => i.id === ghost.id).count === Math.min(8, expect + 1))
+  const stepped = (await scene(page)).items.find((i) => i.id === ghost.id)
+  check(`${label}: ghost ${up ? '+' : '-'} steps the count and pins it`,
+    stepped.count === ghost.count + (up ? 1 : -1) && stepped.autoCount === false, `${ghost.count} -> ${stepped.count}`)
 
   // ---- zone always under the balls ----
   await page.evaluate(() => {
@@ -308,6 +330,137 @@ async function behaviour(page, label) {
   await page.waitForTimeout(150)
   const fresh = await scene(page)
   check(`${label}: new exercise clears table, title and note`, fresh.items.length === 0 && !fresh.title && !fresh.note)
+
+  await stage3(page, label)
+}
+
+/* --------------------------------------------- stage 3: the two widgets */
+
+async function stage3(page, label) {
+  await page.evaluate(() => window.__store.getState().newExercise())
+
+  // ---- strike point: tap to place, then drag the dot ----
+  await tool(page, 'Точка на шаре')
+  const [sx, sy] = await toPage(page, 1000, 900)
+  await page.mouse.click(sx, sy)
+  await page.waitForTimeout(200)
+  let sc = await scene(page)
+  const sp = sc.items.find((i) => i.type === 'strikePoint')
+  check(`${label}: strike point is placed by a tap`, !!sp && sp.sizeMm === 300 && sp.dot.u === 0 && sp.dot.v === 0)
+  await tool(page, 'Выбор')
+  const r = sp.sizeMm / 2
+  // drag the dot from the centre to (0.5 r, -0.3 r) and compare with the release point
+  const target = { x: sp.x + 0.5 * r, y: sp.y - 0.3 * r }
+  await gesture(page, { x: sp.x, y: sp.y }, target)
+  let it = (await scene(page)).items.find((i) => i.id === sp.id)
+  const err = Math.hypot(it.dot.u * r - 0.5 * r, it.dot.v * r - -0.3 * r) / r
+  check(`${label}: dot lands within 2% of the radius of where it was released`, err <= 0.02, `${(err * 100).toFixed(2)}% (u=${it.dot.u.toFixed(3)}, v=${it.dot.v.toFixed(3)})`)
+  check(`${label}: dragging the dot does not move the ball`, it.x === sp.x && it.y === sp.y)
+
+  // dragging the body keeps the dot where it is on the ball
+  const dotBefore = { ...it.dot }
+  await gesture(page, { x: sp.x - 0.6 * r, y: sp.y + 0.5 * r }, { x: sp.x - 0.6 * r + 400, y: sp.y + 0.5 * r + 200 })
+  it = (await scene(page)).items.find((i) => i.id === sp.id)
+  check(`${label}: dragging the body moves the widget`, Math.hypot(it.x - sp.x, it.y - sp.y) > 300, `${Math.hypot(it.x - sp.x, it.y - sp.y).toFixed(0)} mm`)
+  check(`${label}: ...and the dot rides along unchanged`, it.dot.u === dotBefore.u && it.dot.v === dotBefore.v, `u ${it.dot.u.toFixed(3)} v ${it.dot.v.toFixed(3)}`)
+
+  // the dot cannot be pulled past 0.9 r
+  const cur = it
+  await gesture(page, { x: cur.x + cur.dot.u * r, y: cur.y + cur.dot.v * r }, { x: cur.x + 1.6 * r, y: cur.y + 1.2 * r })
+  it = (await scene(page)).items.find((i) => i.id === sp.id)
+  const len = Math.hypot(it.dot.u, it.dot.v)
+  check(`${label}: dot stays at 0.9 r when pulled past the edge`, Math.abs(len - 0.9) <= 0.005, `|dot| = ${len.toFixed(3)}`)
+
+  // snap to the centre: release within 3% of it
+  await gesture(page, { x: it.x + it.dot.u * r, y: it.y + it.dot.v * r }, { x: it.x + 0.015 * r, y: it.y - 0.01 * r })
+  it = (await scene(page)).items.find((i) => i.id === sp.id)
+  check(`${label}: dot snaps to the centre within 3%`, it.dot.u === 0 && it.dot.v === 0, `u ${it.dot.u} v ${it.dot.v}`)
+
+  // ---- power: tap to place, segments, +/- on the plate, keyboard ----
+  await tool(page, 'Сила удара')
+  const [px, py] = await toPage(page, 2600, 1400)
+  await page.mouse.click(px, py)
+  await page.waitForTimeout(200)
+  sc = await scene(page)
+  const pw = sc.items.find((i) => i.type === 'power')
+  check(`${label}: power plate is placed by a tap at 2,5`, !!pw && pw.value === 2.5)
+  await tool(page, 'Выбор')
+  const SERIES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
+  const inSeries = (v) => SERIES.includes(v)
+  // tap the 7th segment (value 3,5): segments start at x - 210 + 74, 22 wide, 6 gap
+  const seg = (i) => ({ x: pw.x - 210 + 74 + i * 28 + 11, y: pw.y })
+  const [cx7, cy7] = await toPage(page, seg(6).x, seg(6).y)
+  await page.mouse.click(cx7, cy7)
+  await page.waitForTimeout(150)
+  let pv = (await scene(page)).items.find((i) => i.id === pw.id)
+  check(`${label}: tapping a segment sets the value`, pv.value === 3.5, String(pv.value))
+  // keyboard, with the plate selected
+  await page.keyboard.press('+')
+  await page.keyboard.press('+')
+  await page.keyboard.press('+')
+  await page.waitForTimeout(100)
+  pv = (await scene(page)).items.find((i) => i.id === pw.id)
+  check(`${label}: + steps by 0,5 and stops at 4,5`, pv.value === 4.5, String(pv.value))
+  for (let k = 0; k < 12; k++) await page.keyboard.press('-')
+  await page.waitForTimeout(100)
+  pv = (await scene(page)).items.find((i) => i.id === pw.id)
+  check(`${label}: - stops at 0,5`, pv.value === 0.5, String(pv.value))
+  // the + button on the plate itself (right of the plate, when selected)
+  const [bx, by] = await toPage(page, pw.x + 210 + 40, pw.y)
+  await page.mouse.click(bx, by)
+  await page.waitForTimeout(150)
+  pv = (await scene(page)).items.find((i) => i.id === pw.id)
+  check(`${label}: + on the plate steps once`, pv.value === 1, String(pv.value))
+  check(`${label}: value always belongs to the nine-step series`, inSeries(pv.value))
+  // the text the export renders carries a comma
+  await page.evaluate((id) => window.__store.getState().setPower(id, 2.5), pw.id)
+  await page.waitForTimeout(150)
+  const texts = await page.evaluate(() => window.__stage.find('Text').map((t) => t.text()))
+  check(`${label}: the plate's text node reads "2,5" with a comma`, texts.includes('2,5'), texts.filter((t) => /\d/.test(t)).join(' | '))
+
+  // ---- wireframe ball: placed by a tap, snaps to contact with a real ball ----
+  await page.evaluate(() => window.__store.getState().addBall('white', { x: 2000, y: 600 }))
+  await tool(page, 'Шар-призрак')
+  const [gx, gy] = await toPage(page, 1700, 900)
+  await page.mouse.click(gx, gy)
+  await page.waitForTimeout(150)
+  const gb = (await scene(page)).items.find((i) => i.type === 'ghostBall')
+  check(`${label}: wireframe ball is placed by a tap`, !!gb)
+  await tool(page, 'Выбор')
+  // drag it to nearly touching the white ball: 67 mm apart is contact, aim for 74
+  const d = (await scene(page)).table.ballMm
+  await gesture(page, gb, { x: 2000 - (d + 7) * Math.SQRT1_2, y: 600 + (d + 7) * Math.SQRT1_2 })
+  const g2 = (await scene(page)).items.find((i) => i.id === gb.id)
+  const dist = Math.hypot(g2.x - 2000, g2.y - 600)
+  check(`${label}: wireframe ball snaps to exactly one diameter from a ball`, Math.abs(dist - d) < 0.05, `${dist.toFixed(2)} mm vs ${d}`)
+
+  // ---- both widgets are ordinary objects: delete, undo, redo, duplicate ----
+  for (const [name, id] of [['strike point', sp.id], ['power plate', pw.id], ['wireframe ball', gb.id]]) {
+    await page.evaluate((i) => window.__store.getState().select(i), id)
+    await page.keyboard.press('Delete')
+    await page.waitForTimeout(100)
+    const gone = !(await scene(page)).items.some((i) => i.id === id)
+    await page.keyboard.press('Control+z')
+    await page.waitForTimeout(100)
+    const back = (await scene(page)).items.some((i) => i.id === id)
+    check(`${label}: ${name} deletes and comes back with undo`, gone && back)
+  }
+  await page.evaluate((i) => window.__store.getState().select(i), sp.id)
+  await page.keyboard.press('Control+d')
+  await page.waitForTimeout(100)
+  check(`${label}: strike point duplicates`, (await scene(page)).items.filter((i) => i.type === 'strikePoint').length === 2)
+
+  // z-order: widgets above balls, below captions
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.addItem({ id: 'cap', type: 'text', x: 500, y: 500, text: 'Подпись', size: 90, color: '#FFFFFF', angle: 0 })
+    st.addItem({ id: 'pw2', type: 'power', x: 900, y: 1500, value: 2 }, 'belowText')
+  })
+  sc = await scene(page)
+  const iPw = sc.items.findIndex((i) => i.id === 'pw2')
+  const iCap = sc.items.findIndex((i) => i.id === 'cap')
+  const iBall = sc.items.findIndex((i) => i.type === 'ball')
+  check(`${label}: a widget lands above balls and below captions`, iPw > iBall && iPw < iCap, `ball ${iBall} < widget ${iPw} < caption ${iCap}`)
 }
 
 /* ------------------------------------- 2. the picture itself, in millimetres */
@@ -406,7 +559,17 @@ async function picture(page, label) {
         .some(([px, py]) => Math.hypot(i.x - px, i.y - py) <= r + 0.01)
       return clear < r - 0.01 && !inPocket
     })
-    return { cornerMouth, middleMouth, escaped, litPct, ghostMm, ballOverZoneWhite, offBed: offBed.length, D }
+    // brass: warm yellow, well above the wood in green, well below white
+    let brass = 0
+    for (const pk of [[0, 0], [LEN / 2, 0], [LEN, 0], [0, WID], [LEN / 2, WID], [LEN, WID]]) {
+      for (let x = pk[0] - 200; x <= pk[0] + 200; x += 3)
+        for (let y = pk[1] - 200; y <= pk[1] + 200; y += 3) {
+          const c = at(x, y)
+          if (!c || c[3] < 200) continue
+          if (c[0] > 175 && c[1] > 130 && c[1] < 215 && c[2] < 120 && c[0] - c[2] > 70) brass++
+        }
+    }
+    return { cornerMouth, middleMouth, escaped, litPct, ghostMm, ballOverZoneWhite, offBed: offBed.length, D, brass }
   })
   check(`${label}: black at the corner mouth is 72 mm ± 10%`, Math.abs(m.cornerMouth - 72) <= 7.2, `${m.cornerMouth.toFixed(1)} mm`)
   check(`${label}: black at the middle mouth is 82 mm ± 10%`, Math.abs(m.middleMouth - 82) <= 8.2, `${m.middleMouth.toFixed(1)} mm`)
@@ -415,6 +578,7 @@ async function picture(page, label) {
   check(`${label}: a ghost is the ball's own diameter`, Math.abs(m.ghostMm - m.D) <= m.D * 0.08, `${m.ghostMm.toFixed(1)} vs ${m.D} mm`)
   check(`${label}: a ball over a zone is drawn on top of it`, !!m.ballOverZoneWhite)
   check(`${label}: no ball centre closer to a rail than its radius (pockets excepted)`, m.offBed === 0, `${m.offBed} off`)
+  check(`${label}: no brass-coloured pixels round the pockets`, m.brass === 0, `${m.brass} samples`)
 
   // ---- the export: caption placement, weight, format, filename ----
   const png = await exportVia(page, label, 'PNG', '2x')

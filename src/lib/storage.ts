@@ -12,7 +12,8 @@
  * table instead of a crash.
  */
 
-import type { ClothColor, Item, Scene } from '../model/types'
+import type { ClothColor, Item, PowerValue, Scene } from '../model/types'
+import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE } from '../model/table'
 
 const KEY = 'biliardconf.scene.v1'
@@ -117,6 +118,32 @@ function parseItem(raw: unknown): Item | null {
         color: str(o.color) ?? '#FFFFFF',
         angle: num(o.angle, 0),
       }
+    }
+    case 'strikePoint': {
+      const p = vec(o)
+      const dot = vec(o.dot) ?? { x: 0, y: 0 }
+      if (!p) return null
+      const len = Math.hypot(dot.x, dot.y)
+      const k = len > 0.9 ? 0.9 / len : 1
+      return {
+        id,
+        type: 'strikePoint',
+        x: p.x,
+        y: p.y,
+        sizeMm: Math.min(500, Math.max(200, num(o.sizeMm, 300))),
+        dot: { u: dot.x * k, v: dot.y * k },
+      }
+    }
+    case 'power': {
+      const p = vec(o)
+      if (!p) return null
+      const value = (POWER_VALUES as readonly number[]).includes(o.value as number) ? (o.value as PowerValue) : 2.5
+      return { id, type: 'power', x: p.x, y: p.y, value }
+    }
+    case 'ghostBall': {
+      const p = vec(o)
+      if (!p) return null
+      return { id, type: 'ghostBall', x: p.x, y: p.y }
     }
     default:
       return null

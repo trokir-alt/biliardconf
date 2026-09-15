@@ -47,6 +47,28 @@ const G = {
   ellipse: glyph(<ellipse cx="9" cy="9" rx="6.5" ry="5" fill="currentColor" opacity=".35" stroke="currentColor" strokeWidth="1.5" />),
   line: glyph(<path d="M3 14 L15 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="4 2.5" />),
   text: glyph(<path d="M4 4 H14 M9 4 V15" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" />),
+  strike: glyph(
+    <>
+      <circle cx="9" cy="9" r="6.5" fill="#F5A623" stroke="rgba(0,0,0,.5)" strokeWidth="1" />
+      <circle cx="9" cy="9" r="3.2" fill="none" stroke="rgba(0,0,0,.5)" strokeWidth="1" />
+      <circle cx="11.2" cy="6.6" r="1.7" fill="#E5322D" stroke="#fff" strokeWidth=".7" />
+    </>,
+  ),
+  power: glyph(
+    <>
+      <rect x="2" y="6" width="3" height="6" rx=".8" fill="#F5A623" />
+      <rect x="6" y="6" width="3" height="6" rx=".8" fill="#F5A623" />
+      <rect x="10" y="6" width="3" height="6" rx=".8" fill="none" stroke="currentColor" strokeWidth="1" />
+      <rect x="14" y="6" width="2.5" height="6" rx=".8" fill="none" stroke="currentColor" strokeWidth="1" />
+    </>,
+  ),
+  ghostBall: glyph(
+    <>
+      <circle cx="9" cy="9" r="6.2" fill="none" stroke="#F5A623" strokeWidth="1.6" />
+      <ellipse cx="9" cy="9" rx="6.2" ry="2.6" fill="none" stroke="#F5A623" strokeWidth="1" opacity=".8" />
+      <ellipse cx="9" cy="9" rx="2.6" ry="6.2" fill="none" stroke="#F5A623" strokeWidth="1" opacity=".8" />
+    </>,
+  ),
 }
 
 const TOOLS: { id: Tool; label: string; icon: React.ReactNode }[] = [
@@ -59,6 +81,9 @@ const TOOLS: { id: Tool; label: string; icon: React.ReactNode }[] = [
   { id: 'zone-rect', label: 'Зона', icon: G.rect },
   { id: 'zone-ellipse', label: 'Эллипс', icon: G.ellipse },
   { id: 'text', label: 'Текст', icon: G.text },
+  { id: 'strike', label: 'Точка на шаре', icon: G.strike },
+  { id: 'power', label: 'Сила удара', icon: G.power },
+  { id: 'ghost-ball', label: 'Шар-призрак', icon: G.ghostBall },
 ]
 
 export function Toolbar({ onExport, onCopy }: ToolbarProps) {

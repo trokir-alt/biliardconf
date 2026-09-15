@@ -11,6 +11,7 @@ import { useStore } from '../state/store'
 import { mmToCss, useView } from '../state/view'
 import { itemBounds } from '../model/item'
 import { INK, STROKE_WIDTHS, TEXT_SIZES } from '../model/style'
+import { formatPower } from '../model/item'
 
 export function Properties() {
   const selectedId = useStore((s) => s.selectedId)
@@ -47,6 +48,8 @@ export function Properties() {
   const hasText = t === 'text'
   const hasZone = t === 'zone'
   const hasBall = t === 'ball'
+  const hasStrike = t === 'strikePoint'
+  const hasPower = t === 'power'
 
   const color = 'color' in item ? item.color : null
 
@@ -184,6 +187,39 @@ export function Properties() {
           <button type="button" className="btn" onClick={() => useView.getState().setEditing(item.id)}>
             Изменить текст
           </button>
+        </div>
+      )}
+
+      {hasStrike && (
+        <div className="props__row">
+          <span className="props__label">Размер</span>
+          <span className="seg" role="group" aria-label="Размер шара">
+            {[200, 300, 400, 500].map((mm) => (
+              <button key={mm} type="button" className="btn seg__btn" aria-pressed={item.sizeMm === mm} onClick={() => st.setStrikeSize(item.id, mm)}>
+                {mm}
+              </button>
+            ))}
+          </span>
+          <button type="button" className="btn" onClick={() => st.resetDot(item.id)} disabled={item.dot.u === 0 && item.dot.v === 0}>
+            Точку в центр
+          </button>
+        </div>
+      )}
+
+      {hasPower && (
+        <div className="props__row">
+          <span className="props__label">Сила</span>
+          <span className="seg" role="group" aria-label="Сила удара">
+            <button type="button" className="btn seg__btn" onClick={() => st.adjustPower(item.id, -1)} disabled={item.value <= 0.5} aria-label="Слабее">
+              −
+            </button>
+            <span className="seg__value" aria-live="polite">
+              {formatPower(item.value)}
+            </span>
+            <button type="button" className="btn seg__btn" onClick={() => st.adjustPower(item.id, 1)} disabled={item.value >= 4.5} aria-label="Сильнее">
+              +
+            </button>
+          </span>
         </div>
       )}
 

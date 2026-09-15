@@ -17,7 +17,9 @@ export function translateItem(item: Item, dx: number, dy: number): Item {
   switch (item.type) {
     case 'ball':
     case 'text':
-    case 'strike':
+    case 'strikePoint':
+    case 'power':
+    case 'ghostBall':
       return { ...item, x: item.x + dx, y: item.y + dy }
     case 'zone':
       return { ...item, x: item.x + dx, y: item.y + dy }
@@ -40,8 +42,12 @@ export function itemBounds(item: Item, ballMm: number): Rect {
   switch (item.type) {
     case 'ball':
       return box([item.x], [item.y], ballMm / 2)
-    case 'strike':
-      return box([item.x], [item.y], 150)
+    case 'strikePoint':
+      return box([item.x], [item.y], item.sizeMm / 2)
+    case 'power':
+      return { x: item.x - POWER_W / 2, y: item.y - POWER_H / 2, w: POWER_W, h: POWER_H }
+    case 'ghostBall':
+      return box([item.x], [item.y], ballMm / 2)
     case 'text':
       // a rough box is enough: it only positions the panel
       return box([item.x], [item.y], item.size)
@@ -57,7 +63,14 @@ export function itemBounds(item: Item, ballMm: number): Rect {
 }
 
 /** The draggable handles of an item, in draw order. */
-export type Handle = { id: string; at: Vec; kind: 'end' | 'bend' | 'corner' | 'rotate' }
+export type Handle = { id: string; at: Vec; kind: 'end' | 'bend' | 'corner' | 'rotate' | 'resize' }
+
+/** the strength plate, in mm */
+export const POWER_W = 420
+export const POWER_H = 100
+/** the strike-point ball may be resized between these */
+export const STRIKE_MIN_MM = 200
+export const STRIKE_MAX_MM = 500
 
 export function itemHandles(item: Item): Handle[] {
   switch (item.type) {
@@ -86,6 +99,11 @@ export function itemHandles(item: Item): Handle[] {
       ]
     case 'text':
       return [{ id: 'rotate', at: { x: item.x, y: item.y - item.size * 1.5 }, kind: 'rotate' }]
+    case 'strikePoint': {
+      // one handle on the rim, at 45 degrees, resizes the ball
+      const r = item.sizeMm / 2
+      return [{ id: 'size', at: { x: item.x + r * Math.SQRT1_2, y: item.y + r * Math.SQRT1_2 }, kind: 'resize' }]
+    }
     default:
       return []
   }
@@ -123,6 +141,10 @@ export function dragHandle(item: Item, handleId: string, to: Vec): Partial<Item>
       const angle = (Math.atan2(to.y - item.y, to.x - item.x) * 180) / Math.PI + 90
       return { angle: Math.round(angle) } as Partial<Item>
     }
+    case 'strikePoint': {
+      const size = 2 * Math.hypot(to.x - item.x, to.y - item.y)
+      return { sizeMm: Math.round(Math.min(STRIKE_MAX_MM, Math.max(STRIKE_MIN_MM, size))) } as Partial<Item>
+    }
     default:
       return null
   }
@@ -134,4 +156,32 @@ export function arrowCurve(points: Vec[]): { a: Vec; c: Vec | null; b: Vec } {
   const b = points[points.length - 1]
   if (points.length < 3) return { a, c: null, b }
   return { a, c: quadControl(a, points[1], b), b }
+}
+
+/** the dot may not leave this fraction of the radius */
+export const DOT_LIMIT = 0.9
+/** magnet to the centre and to the two axes, as a fraction of the radius */
+export const DOT_SNAP = 0.03
+
+/**
+ * Where the dot lands when dragged to `p` (in the ball's own mm frame, origin
+ * at the centre): clamped to 0.9 r, snapped to the centre or an axis within 3%.
+ */
+export function settleDot(p: Vec, radiusMm: number): { u: number; v: number } {
+  let u = p.x / radiusMm
+  let v = p.y / radiusMm
+  const len = Math.hypot(u, v)
+  if (len > DOT_LIMIT) {
+    u = (u / len) * DOT_LIMIT
+    v = (v / len) * DOT_LIMIT
+  }
+  if (Math.hypot(u, v) <= DOT_SNAP) return { u: 0, v: 0 }
+  if (Math.abs(u) <= DOT_SNAP) u = 0
+  if (Math.abs(v) <= DOT_SNAP) v = 0
+  return { u, v }
+}
+
+/** "2,5", "3" - a coach's scale is written with a comma and no trailing zero */
+export function formatPower(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace('.', ',')
 }

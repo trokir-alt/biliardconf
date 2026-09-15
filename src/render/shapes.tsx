@@ -9,16 +9,22 @@
 import { Circle, Ellipse, Group, Line as KLine, Rect, Shape, Text } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
 import type { Shape as KonvaShape } from 'konva/lib/Shape'
+import type { KonvaEventObject } from 'konva/lib/Node'
 import type {
   ArrowItem,
+  GhostBallItem,
   GhostTrailItem,
   LineItem,
+  PowerItem,
+  StrikePointItem,
   TextItem,
   Vec,
   ZoneItem,
 } from '../model/types'
-import { arrowCurve } from '../model/item'
+import { POWER_VALUES } from '../model/types'
+import { POWER_H, POWER_W, arrowCurve, formatPower, settleDot } from '../model/item'
 import { CANVAS_FONT } from '../model/fonts'
+import { BALL } from '../model/theme'
 
 /** dashes scale with the stroke, so a thin dashed line never looks like a rash */
 const dashFor = (w: number, style: string): number[] | undefined =>
@@ -191,5 +197,232 @@ export function TextShape({ item }: { item: TextItem }) {
       shadowBlur={item.size * 0.22}
       shadowForStrokeEnabled={false}
     />
+  )
+}
+
+/* ---------------------------------------------------------------- stage 3 */
+
+const ORANGE = '#F5A623'
+const DOT_RED = '#E5322D'
+
+export type StrikePointProps = {
+  item: StrikePointItem
+  /** px per mm, so the dot's grab area can be sized in screen pixels */
+  scale: number
+  /** live while dragging, final on release */
+  onDot: (dot: { u: number; v: number }, final: boolean) => void
+  onDotStart: () => void
+}
+
+/**
+ * The cue ball from behind with the contact point on it. The dot is its own
+ * draggable node: dragging it moves only the dot, and its drag events are
+ * stopped here so the widget underneath does not also start moving.
+ */
+export function StrikePointShape({ item, scale, onDot, onDotStart }: StrikePointProps) {
+  const r = item.sizeMm / 2
+  const dotR = item.sizeMm / 16
+  // a grab area of at least 44 screen px, however small the dot is drawn
+  const grabR = Math.max(dotR, 22 / Math.max(scale, 1e-6))
+  const stop = (e: KonvaEventObject<Event>) => {
+    e.cancelBubble = true
+  }
+  const move = (e: KonvaEventObject<DragEvent>, final: boolean) => {
+    e.cancelBubble = true
+    const node = e.target
+    const dot = settleDot({ x: node.x(), y: node.y() }, r)
+    node.position({ x: dot.u * r, y: dot.v * r })
+    onDot(dot, final)
+  }
+  const ring = (k: number) => (
+    <Circle key={k} radius={r * k} stroke="rgba(0,0,0,0.55)" strokeWidth={1.6} listening={false} />
+  )
+  return (
+    <Group x={item.x} y={item.y}>
+      {/* the same soft contact shadow a ball has */}
+      <Ellipse
+        x={r * 0.3}
+        y={r * 0.38}
+        radiusX={r * 0.94}
+        radiusY={r * 0.68}
+        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+        fillRadialGradientEndRadius={r * 0.94}
+        fillRadialGradientColorStops={[0, 'rgba(0,0,0,0.34)', 0.55, 'rgba(0,0,0,0.14)', 1, 'rgba(0,0,0,0)']}
+        listening={false}
+      />
+      <Circle
+        radius={r}
+        fillRadialGradientStartPoint={{ x: -r * 0.2, y: -r * 0.22 }}
+        fillRadialGradientStartRadius={r * 0.06}
+        fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+        fillRadialGradientEndRadius={r * 1.06}
+        fillRadialGradientColorStops={[0, '#FFD98A', 0.4, BALL.cue.base, 1, BALL.cue.shade]}
+        stroke="rgba(0,0,0,0.6)"
+        strokeWidth={2}
+      />
+      {[0.25, 0.5, 0.75].map(ring)}
+      <KLine points={[-r, 0, r, 0]} stroke="rgba(0,0,0,0.55)" strokeWidth={1.6} listening={false} />
+      <KLine points={[0, -r, 0, r]} stroke="rgba(0,0,0,0.55)" strokeWidth={1.6} listening={false} />
+      <Group
+        name="dot"
+        x={item.dot.u * r}
+        y={item.dot.v * r}
+        draggable
+        onMouseDown={stop}
+        onTouchStart={stop}
+        onDragStart={(e) => {
+          e.cancelBubble = true
+          onDotStart()
+        }}
+        onDragMove={(e) => move(e, false)}
+        onDragEnd={(e) => move(e, true)}
+      >
+        <Circle radius={grabR} fill="rgba(0,0,0,0)" />
+        <Circle radius={dotR} fill={DOT_RED} stroke="#FFFFFF" strokeWidth={Math.max(1.2, dotR * 0.14)} listening={false} />
+      </Group>
+    </Group>
+  )
+}
+
+const SEG_W = 22
+const SEG_H = 46
+const SEG_GAP = 6
+
+export type PowerProps = {
+  item: PowerItem
+  selected: boolean
+  onValue: (value: (typeof POWER_VALUES)[number]) => void
+  onStep: (steps: number) => void
+}
+
+/**
+ * The strength plate. Nine segments, no colour semantics - it is the coach's
+ * scale, not ours - and the value written the way a coach writes it, "2,5".
+ */
+export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
+  const w = POWER_W
+  const h = POWER_H
+  const segsW = POWER_VALUES.length * SEG_W + (POWER_VALUES.length - 1) * SEG_GAP
+  // label | nine segments | value, laid out so "2,5" never wraps
+  const segX0 = -w / 2 + 74
+  const valX = segX0 + segsW + 8
+  const valW = w / 2 - valX - 12
+  const stop = (e: KonvaEventObject<Event>) => {
+    e.cancelBubble = true
+  }
+  const btn = (sign: -1 | 1) => (
+    <Group
+      x={sign * (w / 2 + 40)}
+      y={0}
+      onClick={(e) => {
+        stop(e)
+        onStep(sign)
+      }}
+      onTap={(e) => {
+        stop(e)
+        onStep(sign)
+      }}
+    >
+      <Circle radius={26} fill="rgba(20,25,32,0.9)" stroke={ORANGE} strokeWidth={2} />
+      <Text
+        text={sign > 0 ? '+' : '−'}
+        fontSize={34}
+        fontFamily={CANVAS_FONT}
+        fontStyle="bold"
+        fill="#FFFFFF"
+        width={52}
+        height={52}
+        offsetX={26}
+        offsetY={26}
+        align="center"
+        verticalAlign="middle"
+        listening={false}
+      />
+    </Group>
+  )
+  return (
+    <Group x={item.x} y={item.y}>
+      <Rect
+        x={-w / 2}
+        y={-h / 2}
+        width={w}
+        height={h}
+        cornerRadius={22}
+        fill="rgba(20,25,32,0.78)"
+        stroke="rgba(255,255,255,0.18)"
+        strokeWidth={1.5}
+      />
+      <Text
+        x={-w / 2 + 18}
+        y={-h / 2}
+        height={h}
+        verticalAlign="middle"
+        text="Сила"
+        fontSize={22}
+        fontFamily={CANVAS_FONT}
+        fill="#C8D0D8"
+        listening={false}
+      />
+      {POWER_VALUES.map((v, i) => (
+        <Rect
+          key={v}
+          x={segX0 + i * (SEG_W + SEG_GAP)}
+          y={-SEG_H / 2}
+          width={SEG_W}
+          height={SEG_H}
+          cornerRadius={4}
+          fill={item.value >= v ? ORANGE : 'rgba(0,0,0,0)'}
+          stroke={item.value >= v ? ORANGE : 'rgba(255,255,255,0.55)'}
+          strokeWidth={2}
+          hitStrokeWidth={SEG_GAP}
+          onClick={(e) => {
+            stop(e)
+            onValue(v)
+          }}
+          onTap={(e) => {
+            stop(e)
+            onValue(v)
+          }}
+        />
+      ))}
+      <Text
+        x={valX}
+        y={-h / 2}
+        width={valW}
+        height={h}
+        align="right"
+        verticalAlign="middle"
+        wrap="none"
+        text={formatPower(item.value)}
+        fontSize={40}
+        fontFamily={CANVAS_FONT}
+        fontStyle="bold"
+        fill="#FFFFFF"
+        listening={false}
+      />
+      {selected && btn(-1)}
+      {selected && btn(1)}
+    </Group>
+  )
+}
+
+/**
+ * The wireframe ball: where a ball should be at the moment of contact. Drawn
+ * at the table's own ball diameter, because the point of it is that the
+ * distance between two centres is exactly one diameter.
+ */
+export function GhostBallShape({ item, ballMm }: { item: GhostBallItem; ballMm: number }) {
+  const r = ballMm / 2
+  return (
+    <Group x={item.x} y={item.y}>
+      {/* a faint fill is the grab area; the wire alone is too thin for a finger */}
+      <Circle radius={r} fill="rgba(245,166,35,0.12)" stroke={ORANGE} strokeWidth={4} />
+      <Ellipse radiusX={r} radiusY={r * 0.42} stroke={ORANGE} strokeWidth={2.2} opacity={0.9} listening={false} />
+      <Ellipse radiusX={r * 0.42} radiusY={r} stroke={ORANGE} strokeWidth={2.2} opacity={0.9} listening={false} />
+      <KLine points={[-r * 0.2, 0, r * 0.2, 0]} stroke={ORANGE} strokeWidth={2.2} listening={false} />
+      <KLine points={[0, -r * 0.2, 0, r * 0.2]} stroke={ORANGE} strokeWidth={2.2} listening={false} />
+    </Group>
   )
 }
