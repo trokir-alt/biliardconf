@@ -117,6 +117,10 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, max
  */
 export async function renderExport(stage: Konva.Stage, opts: ExportOptions): Promise<HTMLCanvasElement> {
   await fontsReady()
+  // the caller has just dropped the selection and the pinch zoom; give React
+  // two frames to push those into the Konva nodes, or the picture would carry
+  // the selection ring or come out as a zoomed-in crop
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   stage.batchDraw()
 
   const pixelRatio = safePixelRatio(stage, opts.pixelRatio)

@@ -71,6 +71,8 @@ export const POWER_H = 100
 /** the strike-point ball may be resized between these */
 export const STRIKE_MIN_MM = 200
 export const STRIKE_MAX_MM = 500
+/** where the strike ball's size handle sits, as a multiple of its radius */
+export const STRIKE_HANDLE_K = 1.3
 
 export function itemHandles(item: Item): Handle[] {
   switch (item.type) {
@@ -100,8 +102,10 @@ export function itemHandles(item: Item): Handle[] {
     case 'text':
       return [{ id: 'rotate', at: { x: item.x, y: item.y - item.size * 1.5 }, kind: 'rotate' }]
     case 'strikePoint': {
-      // one handle on the rim, at 45 degrees, resizes the ball
-      const r = item.sizeMm / 2
+      // the size handle sits OUTSIDE the ball, at 1.3 r on the 45-degree
+      // diagonal: on the rim it collided with the dot (which may go to 0.9 r)
+      // and stole the drag from it
+      const r = item.sizeMm * STRIKE_HANDLE_K / 2
       return [{ id: 'size', at: { x: item.x + r * Math.SQRT1_2, y: item.y + r * Math.SQRT1_2 }, kind: 'resize' }]
     }
     default:
@@ -142,7 +146,7 @@ export function dragHandle(item: Item, handleId: string, to: Vec): Partial<Item>
       return { angle: Math.round(angle) } as Partial<Item>
     }
     case 'strikePoint': {
-      const size = 2 * Math.hypot(to.x - item.x, to.y - item.y)
+      const size = (2 * Math.hypot(to.x - item.x, to.y - item.y)) / STRIKE_HANDLE_K
       return { sizeMm: Math.round(Math.min(STRIKE_MAX_MM, Math.max(STRIKE_MIN_MM, size))) } as Partial<Item>
     }
     default:

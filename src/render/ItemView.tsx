@@ -74,7 +74,7 @@ function inner(item: Item, ballMm: number, selected: boolean, scale: number) {
 
 export function ItemView({ item, ballMm, onEdit, ...rest }: ItemViewProps) {
   const scale = useView((s) => s.layout?.scale ?? 0.3)
-  if (item.type === 'ball') return <BallShape item={item} ballMm={ballMm} {...rest} />
+  if (item.type === 'ball') return <BallShape item={item} ballMm={ballMm} scale={scale} {...rest} />
   const { selected, ...handlers } = rest
   // the wireframe ball is positioned like a real ball, so the stage can clamp
   // and contact-snap it from the node's own coordinates
@@ -92,6 +92,7 @@ export function ItemView({ item, ballMm, onEdit, ...rest }: ItemViewProps) {
         onDragMove={handlers.onDragMove}
         onDragEnd={handlers.onDragEnd}
       >
+        <Circle radius={Math.max(ballMm / 2, 22 / scale)} fill="rgba(0,0,0,0)" />
         <GhostBallShape item={{ ...item, x: 0, y: 0 }} ballMm={ballMm} />
         {selected && (
           <Circle radius={ballMm / 2 + 9} stroke="#FFD166" strokeWidth={5} dash={[22, 14]} listening={false} />

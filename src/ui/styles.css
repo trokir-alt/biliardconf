@@ -732,3 +732,228 @@ kbd {
     font-size: 13px;
   }
 }
+
+/* --------------------------------------------------------- phone shell */
+
+.m-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+.m-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  padding-top: calc(6px + env(safe-area-inset-top, 0px));
+  background: var(--panel);
+  border-bottom: 1px solid var(--panel-edge);
+}
+
+.m-top__title {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: 700 16px 'Exercise Sans', var(--font);
+  padding: 0 8px;
+}
+
+.m-top__title:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.m-top__title::placeholder {
+  color: var(--dim);
+  font-weight: 400;
+}
+
+.btn--accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn--wide {
+  width: 100%;
+}
+
+.m-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.m-stage .stage-wrap__canvas {
+  height: 100%;
+}
+
+/* the dock: one row of icons, scrolls sideways if it has to, never wraps */
+.m-dock {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
+  background: var(--panel);
+  border-top: 1px solid var(--panel-edge);
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.m-dock::-webkit-scrollbar {
+  display: none;
+}
+
+.m-dock__tool {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 58px;
+  min-height: 56px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.m-dock__tool .glyph {
+  width: 22px;
+  height: 22px;
+}
+
+.m-dock__label {
+  font-size: 10px;
+  line-height: 1;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.m-dock__tool.is-active {
+  background: var(--accent-tint);
+  border-color: var(--accent);
+}
+
+.m-dock__tool.is-active .m-dock__label {
+  color: var(--text);
+}
+
+/* bottom sheets */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+}
+
+.sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.sheet__card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-top: 1px solid var(--panel-edge);
+  border-radius: 16px 16px 0 0;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.sheet__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 6px 16px;
+}
+
+.sheet__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.sheet__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 16px 16px;
+  overflow-y: auto;
+}
+
+.row--wrap {
+  flex-wrap: wrap;
+}
+
+.caption--sheet {
+  width: 100%;
+  border-color: var(--panel-edge);
+  text-align: left;
+}
+
+@media (max-width: 860px) {
+  /* on the phone the properties strip sits just above the dock */
+  .m-stage .props {
+    left: 6px !important;
+    right: 6px;
+    top: auto !important;
+    bottom: 6px;
+    max-width: none;
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .m-stage .props__row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .m-stage .props__row::-webkit-scrollbar {
+    display: none;
+  }
+
+  .props__row--nudge .btn--icon {
+    min-width: 44px;
+  }
+
+  /* the strip goes to whichever edge is farther from the selected object,
+     so it never covers what is being edited */
+  .m-stage .props--top {
+    top: 6px !important;
+    bottom: auto;
+  }
+}
+
+/* icon buttons in the top bar and sheet heads keep their size */
+.m-top .btn,
+.sheet__head .btn {
+  flex: 0 0 auto;
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+}

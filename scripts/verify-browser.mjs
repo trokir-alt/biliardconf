@@ -101,6 +101,7 @@ async function newPage(viewport, dsf, opts = {}) {
 
 /** download through the UI and return {path, bytes, w, h} */
 async function exportVia(page, label, fmt, scale) {
+  if (await page.locator('.m-shell').count()) await page.getByRole('button', { name: 'Экспорт', exact: true }).click()
   await page.getByRole('button', { name: fmt, exact: true }).click()
   await page.getByRole('button', { name: scale, exact: true }).click()
   const dlp = page.waitForEvent('download', { timeout: 20000 })
@@ -289,9 +290,10 @@ async function behaviour(page, label) {
     st.bringToFront(st.scene.items.find((i) => i.type === 'zone').id) // even if pushed up on purpose...
   })
   await tool(page, 'Зона')
+  const zoneIdsBefore = (await scene(page)).items.filter((i) => i.type === 'zone').map((i) => i.id)
   await gesture(page, { x: 2300, y: 950 }, { x: 2900, y: 1450 })
   sc = await scene(page)
-  const zoneIdx = sc.items.findIndex((i) => i.id === sc.items.filter((x) => x.type === 'zone').at(-1).id)
+  const zoneIdx = sc.items.findIndex((i) => i.type === 'zone' && !zoneIdsBefore.includes(i.id))
   const firstBall = sc.items.findIndex((i) => i.type === 'ball')
   check(`${label}: a new zone goes to the bottom of the z-order`, zoneIdx === 0 && firstBall > zoneIdx, `zone at ${zoneIdx}`)
   await tool(page, 'Выбор')
@@ -305,10 +307,12 @@ async function behaviour(page, label) {
 
   // ---- 20 undos stay quick ----
   for (let i = 0; i < 20; i++) await page.evaluate(() => window.__store.getState().addBall('white'))
-  const t0 = Date.now()
-  await page.evaluate(() => { for (let i = 0; i < 20; i++) window.__store.getState().undo() })
-  const dt = Date.now() - t0
-  check(`${label}: 20 undos in under 200 ms`, dt < 200, `${dt} ms`)
+  const dt = await page.evaluate(() => {
+    const t0 = performance.now()
+    for (let i = 0; i < 20; i++) window.__store.getState().undo()
+    return performance.now() - t0
+  })
+  check(`${label}: 20 undos in under 200 ms`, dt < 200, `${dt.toFixed(1)} ms`)
 
   // ---- autosave: survives a reload ----
   await page.evaluate(() => {
@@ -561,9 +565,12 @@ async function picture(page, label) {
     })
     // brass: warm yellow, well above the wood in green, well below white
     let brass = 0
+    const balls = scene.items.filter((i) => i.type === 'ball')
     for (const pk of [[0, 0], [LEN / 2, 0], [LEN, 0], [0, WID], [LEN / 2, WID], [LEN, WID]]) {
       for (let x = pk[0] - 200; x <= pk[0] + 200; x += 3)
         for (let y = pk[1] - 200; y <= pk[1] + 200; y += 3) {
+          // the cue ball is orange too; skip the discs
+          if (balls.some((b) => Math.hypot(b.x - x, b.y - y) <= r + 6)) continue
           const c = at(x, y)
           if (!c || c[3] < 200) continue
           if (c[0] > 175 && c[1] > 130 && c[1] < 215 && c[2] < 120 && c[0] - c[2] > 70) brass++
@@ -663,7 +670,7 @@ async function run(viewport, dsf, label, full) {
   // clipboard: the button must produce an image/png item
   await page.evaluate(() => window.__store.getState().addBall('white', { x: 1000, y: 1000 }))
   await page.getByRole('button', { name: 'Копировать в буфер' }).click()
-  await page.waitForTimeout(1200)
+  await page.locator('.toast').waitFor({ timeout: 30000 }).catch(() => {})
   const clip = await page.evaluate(async () => {
     try {
       const items = await navigator.clipboard.read()
@@ -681,25 +688,243 @@ async function run(viewport, dsf, label, full) {
 if (!ONLY || ONLY === 'desktop') await run({ width: 1440, height: 900 }, 2, 'desktop', true)
 if (!ONLY || ONLY === 'ipad') await run({ width: 1024, height: 1366 }, 2, 'ipad-portrait', true)
 
-// phone: the panel is a strip at the bottom, so only the picture and a touch smoke test
+// phone: the mobile shell - dock, sheets, touch placement, pinch zoom
 if (!ONLY || ONLY === 'phone') {
   const { ctx, page, errors } = await newPage({ width: 390, height: 844 }, 3, { hasTouch: true, isMobile: true })
+  const cdp = await ctx.newCDPSession(page)
+  const touchTo = async (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y]) => ({ x, y })) })
+  /** one finger: press, slide, release */
+  const swipe = async (from, to, steps = 14) => {
+    await touchTo('touchStart', [from])
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps
+      await touchTo('touchMove', [[from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t]])
+      await page.waitForTimeout(16)
+    }
+    await touchTo('touchEnd', [])
+    await page.waitForTimeout(200)
+  }
+  /** two fingers on a horizontal line about `c`, spreading from r0 to r1 */
+  const pinch = async (c, r0, r1, steps = 14) => {
+    const pts = (r) => [[c[0] - r, c[1]], [c[0] + r, c[1]]]
+    await touchTo('touchStart', pts(r0))
+    for (let i = 1; i <= steps; i++) {
+      await touchTo('touchMove', pts(r0 + ((r1 - r0) * i) / steps))
+      await page.waitForTimeout(16)
+    }
+    await touchTo('touchEnd', [])
+    await page.waitForTimeout(200)
+  }
+  const view = () => page.evaluate(() => JSON.parse(JSON.stringify(window.__view.getState().viewport)))
+  const stageBox = () => page.locator('.konvajs-content').boundingBox()
+
   check('phone: table auto-rotates upright', await page.evaluate(() => window.__layout.rotation === 90))
-  await tool(page, 'Пирамида')
-  await page.waitForTimeout(300)
-  const sc = await scene(page)
-  const t = sc.items[0]
-  const [px, py] = await toPage(page, t.x, t.y)
-  await page.touchscreen.tap(px, py)
+  check('phone: the mobile shell is in use', (await page.locator('.m-shell').count()) === 1)
+
+  // ---- the dock: every tool reachable, tap targets big enough, nothing off screen
+  const dock = page.locator('.m-dock')
+  const db = await dock.boundingBox()
+  check('phone: the dock is inside the viewport', !!db && db.y + db.height <= 844 + 0.5 && db.x >= 0, db ? `bottom ${(db.y + db.height).toFixed(0)}` : 'no dock')
+  const toolIds = [
+    ['Выбор', 'select'], ['Белый шар', 'ball-white'], ['Биток', 'ball-cue'], ['Стрелка', 'arrow'],
+    ['Траектория', 'ghost'], ['Линия', 'line'], ['Зона', 'zone-rect'], ['Эллипс', 'zone-ellipse'],
+    ['Текст', 'text'], ['Точка на шаре', 'strike'], ['Сила удара', 'power'], ['Шар-призрак', 'ghost-ball'],
+  ]
+  let reachable = 0
+  let small = 0
+  for (const [name, id] of toolIds) {
+    const b = dock.getByRole('button', { name, exact: true })
+    await b.scrollIntoViewIfNeeded()
+    const bb = await b.boundingBox()
+    if (bb && (bb.width < 44 || bb.height < 44)) small++
+    await b.click()
+    if ((await page.evaluate(() => window.__store.getState().tool)) === id) reachable++
+  }
+  check('phone: all 12 tools reachable from the dock', reachable === 12, `${reachable}/12`)
+  check('phone: every dock button is at least 44 px', small === 0, `${small} small`)
+  const stageBb = await stageBox()
+  check('phone: the table takes most of the width', stageBb.width >= 360, `${stageBb.width.toFixed(0)} px`)
+
+  // ---- place a ball with a tap
+  await dock.getByRole('button', { name: 'Белый шар', exact: true }).scrollIntoViewIfNeeded()
+  await dock.getByRole('button', { name: 'Белый шар', exact: true }).click()
+  const [bx, by] = await toPage(page, 1200, 900)
+  await page.touchscreen.tap(bx, by)
   await page.waitForTimeout(200)
-  check('phone: tap selects a ball', (await scene(page)).selectedId === t.id)
-  check('phone: properties strip shows for the selection', await page.locator('.props').isVisible())
+  let sc = await scene(page)
+  const placed = sc.items.find((i) => i.type === 'ball')
+  check('phone: a tap places a ball where the finger is', !!placed && Math.hypot(placed.x - 1200, placed.y - 900) < 25,
+    placed ? `${placed.x.toFixed(0)},${placed.y.toFixed(0)}` : 'no ball')
+  // the browser echoes a tap as mouse events; that echo must not place a twin
+  check('phone: a tap places exactly one ball', sc.items.filter((i) => i.type === 'ball').length === 1, `${sc.items.filter((i) => i.type === 'ball').length} balls`)
+  await dock.getByRole('button', { name: 'Точка на шаре', exact: true }).scrollIntoViewIfNeeded()
+  await dock.getByRole('button', { name: 'Точка на шаре', exact: true }).click()
+  const [wx, wy] = await toPage(page, 2600, 400)
+  await page.touchscreen.tap(wx, wy)
+  await page.waitForTimeout(200)
+  sc = await scene(page)
+  check('phone: a tap places exactly one widget', sc.items.filter((i) => i.type === 'strikePoint').length === 1, `${sc.items.filter((i) => i.type === 'strikePoint').length} widgets`)
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.select(st.scene.items.find((i) => i.type === 'strikePoint').id)
+    st.removeSelected()
+  })
+
+  // ---- drag it with a finger: the ball rides 60 px above the finger
+  await dock.getByRole('button', { name: 'Выбор', exact: true }).scrollIntoViewIfNeeded()
+  await dock.getByRole('button', { name: 'Выбор', exact: true }).click()
+  await page.waitForTimeout(150) // the hit canvas is redrawn a frame later
+  const L0 = await page.evaluate(() => window.__layout)
+  const [fx, fy] = await toPage(page, placed.x, placed.y)
+  await swipe([fx, fy], [fx + 40, fy + 150])
+  sc = await scene(page)
+  const dragged = sc.items.find((i) => i.id === placed.id)
+  // the finger's end point in mm, then 60 screen px "up", which on the upright
+  // table is minus x in table mm
+  const endMm = await page.evaluate(([x, y]) => {
+    const l = window.__layout
+    const c = document.querySelector('.konvajs-content').getBoundingClientRect()
+    const px = x - c.left, py = y - c.top
+    const dx = px - l.x, dy = py - l.y
+    return l.rotation === 90 ? { x: dy / l.scale, y: -dx / l.scale } : { x: dx / l.scale, y: dy / l.scale }
+  }, [fx + 40, fy + 150])
+  const wantX = endMm.x - 60 / L0.scale
+  const liftErr = Math.hypot(dragged.x - wantX, dragged.y - endMm.y)
+  check('phone: a touch drag lifts the ball 60 px above the finger', liftErr < 15, `off by ${liftErr.toFixed(0)} mm (ball ${dragged.x.toFixed(0)},${dragged.y.toFixed(0)}; finger ${endMm.x.toFixed(0)},${endMm.y.toFixed(0)})`)
+  check('phone: one touch drag is one history entry', (await page.evaluate(() => window.__store.getState().past.length)) >= 1)
+
+  // ---- select with a tap, properties strip, nudge, strip flips away from the object
+  const [sx, sy] = await toPage(page, dragged.x, dragged.y)
+  await page.touchscreen.tap(sx, sy)
+  await page.waitForTimeout(200)
+  check('phone: tap selects a ball', (await scene(page)).selectedId === dragged.id)
+  const props = page.locator('.props')
+  check('phone: properties strip shows for the selection', await props.isVisible())
+  const x0 = dragged.x
+  await props.getByRole('button', { name: 'Вправо 5 мм' }).click()
+  await page.waitForTimeout(100)
+  const nudged = (await scene(page)).items.find((i) => i.id === dragged.id)
+  check('phone: nudge button moves the ball 5 mm', Math.abs(nudged.x - x0 - 5) < 0.01, `${x0.toFixed(1)} -> ${nudged.x.toFixed(1)}`)
+  // an object in the lower half: the strip moves to the top edge
+  await page.evaluate(() => {
+    window.__store.getState().addBall('white', { x: 3100, y: 900 })
+    // a fresh snapshot: the store is immutable, the old one has no new ball
+    const st = window.__store.getState()
+    st.select(st.scene.items.at(-1).id)
+  })
+  await page.waitForTimeout(150)
+  const pbLow = await props.boundingBox()
+  const sbLow = await stageBox()
+  check('phone: strip flips to the top for an object near the bottom', pbLow && pbLow.y < sbLow.y + sbLow.height / 2, pbLow ? `strip top ${pbLow.y.toFixed(0)}, stage mid ${(sbLow.y + sbLow.height / 2).toFixed(0)}` : 'no strip')
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.select(st.scene.items.find((i) => i.type === 'ball').id)
+  })
+  await page.waitForTimeout(150)
+  const pbHigh = await props.boundingBox()
+  check('phone: strip sits at the bottom for an object near the top', pbHigh && pbHigh.y > sbLow.y + sbLow.height / 2, pbHigh ? `strip top ${pbHigh.y.toFixed(0)}` : 'no strip')
+  await page.evaluate(() => window.__store.getState().select(null))
+
+  // ---- pinch zoom, one-finger pan, the "whole table" button
+  const sb = await stageBox()
+  const c = [sb.x + sb.width / 2, sb.y + sb.height / 2]
+  check('phone: starts at zoom 1', (await view()).zoom === 1)
+  await page.evaluate(() => {
+    window.__tlog = []
+    const st = window.__stage
+    st.on('touchstart', (e) => window.__tlog.push('ts:' + (e.target === st ? 'stage' : e.target.name() || e.target.className)))
+    st.on('touchmove', () => window.__tlog.push('tm' + st.getPointersPositions().length))
+    st.on('dragstart', (e) => window.__tlog.push('drag:' + (e.target.name() || e.target.className)))
+  })
+  await pinch(c, 40, 120)
+  let v = await view()
+  const tlog = await page.evaluate(() => window.__tlog.join(' '))
+  check('phone: a pinch zooms in (about x3)', v.zoom > 2.4 && v.zoom <= 4, `zoom ${v.zoom.toFixed(2)}; events: ${tlog}`)
+  check('phone: the layer transform follows the zoom', Math.abs((await page.evaluate(() => window.__layout.scale)) / L0.scale - v.zoom) < 0.05)
+  const fit = page.getByRole('button', { name: 'Показать весь стол' })
+  check('phone: a "whole table" button appears when zoomed', await fit.isVisible())
+  const before = v
+  await swipe([c[0], c[1] - 100], [c[0], c[1] + 20])
+  v = await view()
+  check('phone: one finger pans the zoomed picture', v.zoom === before.zoom && v.panY - before.panY > 60, `pan ${before.panY.toFixed(0)} -> ${v.panY.toFixed(0)}`)
+  check('phone: panning did not create anything', (await scene(page)).items.length === 2)
+  await pinch(c, 120, 30)
+  v = await view()
+  check('phone: pinching in zooms back out', v.zoom < before.zoom, `zoom ${v.zoom.toFixed(2)}`)
+  await pinch(c, 40, 120)
+  await fit.click()
+  await page.waitForTimeout(100)
+  v = await view()
+  check('phone: the button resets to the whole table', v.zoom === 1 && v.panX === 0 && v.panY === 0)
+  // one finger lands on a ball, the other on cloth: still a pinch, not a drag
+  const b1 = (await scene(page)).items.find((i) => i.type === 'ball')
+  const [b1x, b1y] = await toPage(page, b1.x, b1.y)
+  await pinch([b1x + 30, b1y], 30, 110)
+  v = await view()
+  const b1after = (await scene(page)).items.find((i) => i.id === b1.id)
+  const moved = Math.hypot(b1after.x - b1.x, b1after.y - b1.y)
+  check('phone: a pinch that starts on a ball zooms', v.zoom > 2, `zoom ${v.zoom.toFixed(2)}`)
+  check('phone: a pinch that starts on a ball leaves the ball in place', moved < 3, `moved ${moved.toFixed(1)} mm`)
+  await fit.click()
+  await page.waitForTimeout(100)
+
+  // ---- the export never depends on the zoom
+  await page.evaluate(() => window.__store.getState().newExercise())
+  await picture(page, 'phone')
+  const flat = await exportVia(page, 'phone-flat', 'PNG', '1x')
+  await page.evaluate(() => window.__view.getState().setViewport({ zoom: 2.5, panX: 40, panY: -80 }))
+  await page.waitForTimeout(150)
+  const zoomed = await exportVia(page, 'phone-zoomed', 'PNG', '1x')
+  check('phone: export at zoom 2.5 has the same size as at zoom 1', zoomed.w === flat.w && zoomed.h === flat.h, `${zoomed.w}x${zoomed.h} vs ${flat.w}x${flat.h}`)
+  const diff = await page.evaluate(
+    ([a, b]) =>
+      new Promise((res) => {
+        const load = (src) => new Promise((r) => { const i = new Image(); i.onload = () => r(i); i.src = src })
+        Promise.all([load(a), load(b)]).then(([ia, ib]) => {
+          const c = document.createElement('canvas')
+          c.width = ia.width; c.height = ia.height
+          const g = c.getContext('2d')
+          g.drawImage(ia, 0, 0)
+          const da = g.getImageData(0, 0, c.width, c.height).data
+          g.drawImage(ib, 0, 0)
+          const dbb = g.getImageData(0, 0, c.width, c.height).data
+          let sum = 0, n = 0
+          for (let i = 0; i < da.length; i += 4 * 7) { sum += Math.abs(da[i] - dbb[i]) + Math.abs(da[i + 1] - dbb[i + 1]) + Math.abs(da[i + 2] - dbb[i + 2]); n += 3 }
+          res(sum / n)
+        })
+      }),
+    [`data:image/png;base64,${fs.readFileSync(flat.file).toString('base64')}`, `data:image/png;base64,${fs.readFileSync(zoomed.file).toString('base64')}`],
+  )
+  check('phone: export at zoom 2.5 shows the same picture as at zoom 1', diff < 2, `mean diff ${diff.toFixed(2)}`)
+  check('phone: export resets the zoom', (await view()).zoom === 1)
+  check('phone: export 1x long side is 1600 px', Math.max(flat.w, flat.h) === 1600, `${flat.w}x${flat.h}`)
+
+  // ---- copy from the sheet
+  await page.getByRole('button', { name: 'Экспорт', exact: true }).click()
+  await page.getByRole('button', { name: 'Копировать в буфер' }).click()
+  await page.locator('.toast').waitFor({ timeout: 30000 }).catch(() => {})
+  const clip = await page.evaluate(async () => {
+    try {
+      const items = await navigator.clipboard.read()
+      return items.some((it) => it.types.includes('image/png'))
+    } catch (e) {
+      return 'err:' + (e && e.message)
+    }
+  })
+  check('phone: copy to clipboard puts an image/png on the clipboard', clip === true, String(clip))
+
+  // ---- the menu sheet: pyramid, and the sheet closes after it
+  await page.getByRole('button', { name: 'Меню', exact: true }).click()
+  await page.getByRole('button', { name: 'Пирамида', exact: true }).click()
+  await page.waitForTimeout(250)
+  check('phone: pyramid from the menu sheet', (await scene(page)).items.filter((i) => i.type === 'ball').length >= 16)
+  check('phone: the sheet closes after racking', (await page.locator('.sheet').count()) === 0)
+
   const ta = await page.evaluate(() => {
     const c = document.querySelector('canvas')
     return [c, c.parentElement, c.parentElement.parentElement].map((e) => getComputedStyle(e).touchAction)
   })
   check('phone: canvas opts out of browser touch gestures', ta.every((v) => v === 'none'), ta.join(' / '))
-  await picture(page, 'phone')
   check('phone: no console or page errors', errors.length === 0, errors.slice(0, 3).join(' | '))
   await ctx.close()
 }

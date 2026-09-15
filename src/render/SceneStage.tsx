@@ -10,7 +10,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Group, Layer, Stage } from 'react-konva'
-import type Konva from 'konva'
+import Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { Item, Vec } from '../model/types'
 import { buildGeometry, clampToField } from '../model/table'
@@ -23,12 +23,25 @@ import { useView } from '../state/view'
 import { ItemView } from './ItemView'
 import { Handles } from './Handles'
 import { TableView } from './TableView'
-import { computeLayout, pxToMm } from './layout'
+import { ZOOM_MAX, ZOOM_MIN, clampPan, computeLayout, pxToMm, type StageLayout, type Viewport } from './layout'
 
 /** below this the table is turned upright, spec section 9 */
 const NARROW_PX = 860
 /** a gesture shorter than this is a tap, not an object */
 const MIN_GESTURE_MM = 40
+/** on touch a dragged ball rides this far above the finger, so the finger
+    never hides what it is placing */
+const LIFT_PX = 60
+
+type Pinch = { dist: number; mid: Vec; view: Viewport }
+type Pan = { from: Vec; view: Viewport }
+
+/** a finger, not a mouse: the native event behind a Konva one */
+function isTouch(evt: unknown): boolean {
+  if (!evt || typeof evt !== 'object') return false
+  const o = evt as { touches?: unknown; pointerType?: string }
+  return 'touches' in o || o.pointerType === 'touch'
+}
 
 type Draft = { tool: Tool; from: Vec; to: Vec }
 
@@ -40,9 +53,24 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const [box, setBox] = useState({ w: 0, h: 0 })
   const [draft, setDraft] = useState<Draft | null>(null)
+  const ready = box.w > 0 && box.h > 0
   const dragging = useRef(false)
   /** running delta of a non-ball drag; the store is only written on release */
   const dragStartPos = useRef<Vec | null>(null)
+  /** mm offset added to a touch-dragged ball, see LIFT_PX; null for a mouse */
+  const liftRef = useRef<Vec | null>(null)
+  /** the two-finger gesture in progress */
+  const pinchRef = useRef<Pinch | null>(null)
+  /** one finger sliding a zoomed picture */
+  const panRef = useRef<Pan | null>(null)
+  /** fingers on the canvas right now, kept by native listeners: Konva stops
+      delivering touch events to the stage while one of its nodes is dragged */
+  const touchesRef = useRef(0)
+  /** a node drag that a second finger turned into a pinch; its end writes nothing */
+  const cancelledDragRef = useRef(false)
+  /** when the last finger went down; a mouse event right after it is the
+      browser's compatibility echo of the same tap, not a second tap */
+  const lastTouchRef = useRef(0)
 
   const table = useStore((s) => s.scene.table)
   const items = useStore((s) => s.scene.items)
@@ -50,12 +78,17 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   const tool = useStore((s) => s.tool)
   const orientation = useStore((s) => s.orientation)
   const setEditing = useView((s) => s.setEditing)
+  const viewport = useView((s) => s.viewport)
 
   const g = useMemo(() => buildGeometry(table), [table])
   const layout = useMemo(
-    () => computeLayout(g, orientation, box.w, box.h),
-    [g, orientation, box.w, box.h],
+    () => computeLayout(g, orientation, box.w, box.h, viewport),
+    [g, orientation, box.w, box.h, viewport],
   )
+  const layoutRef = useRef<StageLayout>(layout)
+  useEffect(() => {
+    layoutRef.current = layout
+  }, [layout])
 
   /* ---------------------------------------------------- size + auto rotate */
 
@@ -90,6 +123,8 @@ export function SceneStage({ stageRef }: SceneStageProps) {
     publishDebug('__layout', layout)
     // the very nodes the export renders, so a test can read a caption's text
     publishDebug('__stage', stageRef.current)
+    publishDebug('__view', useView)
+    publishDebug('__konva', Konva)
   }, [layout, stageRef])
 
   useEffect(() => {
@@ -133,10 +168,24 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   /* the press: start a gesture, place a caption, or just clear the selection */
   const onPointerDown = useCallback(
     (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
+      if (isTouch(e.evt)) {
+        lastTouchRef.current = Date.now()
+        // no compatibility mouse events after this touch, so a tap on the
+        // cloth places one ball, not two; and the keyboard goes away
+        if (e.evt.cancelable) e.evt.preventDefault()
+        const el = document.activeElement
+        if (el instanceof HTMLElement && el !== document.body) el.blur()
+      } else if (Date.now() - lastTouchRef.current < 700) return
       if (e.target !== e.target.getStage()) return
       const st = useStore.getState()
       const p = pointerMm()
       if (!p) return
+      if (st.tool === 'select' && isTouch(e.evt) && layoutRef.current.zoom > 1) {
+        // a zoomed picture slides under one finger; the tap still deselects
+        const pos = stageRef.current?.getPointerPosition()
+        if (pos) panRef.current = { from: pos, view: useView.getState().viewport }
+        return
+      }
       if (DRAG_TOOLS.includes(st.tool)) {
         e.evt.preventDefault()
         const from = snapPt(p)
@@ -172,7 +221,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
         return
       }
     },
-    [pointerMm, snapPt, setEditing],
+    [pointerMm, snapPt, setEditing, stageRef],
   )
 
   const onPointerMove = useCallback(() => {
@@ -181,6 +230,117 @@ export function SceneStage({ stageRef }: SceneStageProps) {
     if (!p) return
     setDraft((d) => (d ? { ...d, to: p } : d))
   }, [pointerMm])
+
+  /* ------------------------------------------------ pinch zoom, touch pan */
+
+  /** stage px of the first two fingers, or null */
+  const twoFingers = useCallback((): [Vec, Vec] | null => {
+    const stage = stageRef.current
+    if (!stage) return null
+    const pts = stage.getPointersPositions()
+    if (pts.length < 2) return null
+    return [
+      { x: pts[0].x, y: pts[0].y },
+      { x: pts[1].x, y: pts[1].y },
+    ]
+  }, [stageRef])
+
+  /** two fingers: zoom about their midpoint. Runs on the container in the
+      capture phase, so it sees every move even while Konva drags a node. */
+  const pinchMove = useCallback(
+    (evt: TouchEvent) => {
+      const stage = stageRef.current
+      if (!stage) return
+      if (evt.touches.length < 2) {
+        pinchRef.current = null
+        return
+      }
+      if (evt.cancelable) evt.preventDefault()
+      stage.setPointersPositions(evt)
+      const fingers = twoFingers()
+      if (!fingers) return
+      // a second finger turns any gesture into a pinch
+      if (dragging.current) {
+        dragging.current = false
+        setDraft(null)
+      }
+      panRef.current = null
+      stage.find((n: Konva.Node) => n.isDragging()).forEach((n) => {
+        cancelledDragRef.current = true
+        n.stopDrag()
+      })
+      const L = layoutRef.current
+      const [a, b] = fingers
+      const dist = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y))
+      const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+      let start = pinchRef.current
+      if (!start) {
+        start = { dist, mid, view: useView.getState().viewport }
+        pinchRef.current = start
+        return
+      }
+      const zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, (start.view.zoom * dist) / start.dist))
+      const k = zoom / start.view.zoom
+      const cx = L.stageW / 2
+      const cy = L.stageH / 2
+      // the cloth under the fingers' midpoint stays under the midpoint
+      const next: Viewport = {
+        zoom,
+        panX: mid.x - cx - (start.mid.x - cx - start.view.panX) * k,
+        panY: mid.y - cy - (start.mid.y - cy - start.view.panY) * k,
+      }
+      useView.getState().setViewport(clampPan(next, L.stageW, L.stageH))
+    },
+    [twoFingers, stageRef],
+  )
+
+  useEffect(() => {
+    const stage = stageRef.current
+    if (!ready || !stage) return
+    const el = stage.container()
+    const count = (evt: TouchEvent) => {
+      touchesRef.current = evt.touches.length
+      if (evt.touches.length < 2) pinchRef.current = null
+    }
+    const opts = { capture: true, passive: false } as const
+    el.addEventListener('touchstart', count, opts)
+    el.addEventListener('touchend', count, opts)
+    el.addEventListener('touchcancel', count, opts)
+    el.addEventListener('touchmove', pinchMove, opts)
+    return () => {
+      el.removeEventListener('touchstart', count, opts)
+      el.removeEventListener('touchend', count, opts)
+      el.removeEventListener('touchcancel', count, opts)
+      el.removeEventListener('touchmove', pinchMove, opts)
+    }
+  }, [ready, pinchMove, stageRef])
+
+  /** one finger: slide a zoomed picture, or extend the draft */
+  const onTouchMove = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      if (e.evt.touches.length >= 2) return // pinchMove has it
+      const pan = panRef.current
+      const pos = stageRef.current?.getPointerPosition()
+      if (pan && pos) {
+        if (e.evt.cancelable) e.evt.preventDefault()
+        const L = layoutRef.current
+        useView.getState().setViewport(
+          clampPan(
+            {
+              zoom: pan.view.zoom,
+              panX: pan.view.panX + (pos.x - pan.from.x),
+              panY: pan.view.panY + (pos.y - pan.from.y),
+            },
+            L.stageW,
+            L.stageH,
+          ),
+        )
+        return
+      }
+      onPointerMove()
+    },
+    [onPointerMove, stageRef],
+  )
 
   /** release: commit the draft if it is long enough to be an object */
   const finishGesture = useCallback(
@@ -258,6 +418,18 @@ export function SceneStage({ stageRef }: SceneStageProps) {
 
   const onPointerUp = useCallback(() => finishGesture(pointerMm()), [finishGesture, pointerMm])
 
+  const onTouchEnd = useCallback(
+    (e: KonvaEventObject<TouchEvent>) => {
+      const left = e.evt.touches ? e.evt.touches.length : 0
+      if (left < 2) pinchRef.current = null
+      if (left === 0) {
+        panRef.current = null
+        finishGesture(pointerMm())
+      }
+    },
+    [finishGesture, pointerMm],
+  )
+
   /* the pointer can leave the canvas mid-gesture; finish on the window instead */
   useEffect(() => {
     const end = () => finishGesture(null)
@@ -273,6 +445,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   const onStageTap = useCallback(
     (e: KonvaEventObject<MouseEvent | TouchEvent>) => {
       if (e.target !== e.target.getStage()) return
+      if (!isTouch(e.evt) && Date.now() - lastTouchRef.current < 700) return
       const st = useStore.getState()
       if (st.tool === 'ball-white' || st.tool === 'ball-cue') {
         const p = pointerMm()
@@ -288,33 +461,71 @@ export function SceneStage({ stageRef }: SceneStageProps) {
 
   const handleDragStart = useCallback((e: KonvaEventObject<DragEvent>) => {
     const node = e.target
+    if (touchesRef.current >= 2) {
+      // the finger that landed on this object is half of a pinch
+      cancelledDragRef.current = true
+      node.stopDrag()
+      return
+    }
     const st = useStore.getState()
     st.select(node.id())
     st.beginHistory()
     dragStartPos.current = { x: node.x(), y: node.y() }
+    const name = node.name()
+    liftRef.current = null
+    if ((name === 'ball' || name === 'ghostBall') && isTouch(e.evt)) {
+      const L = layoutRef.current
+      const a = pxToMm(L, { x: 0, y: 0 })
+      const b = pxToMm(L, { x: 0, y: -LIFT_PX })
+      liftRef.current = { x: b.x - a.x, y: b.y - a.y }
+    }
+  }, [])
+
+  /** where the dragged ball goes: under the mouse, or above the finger */
+  const lifted = useCallback((node: Konva.Node): Vec => {
+    const l = liftRef.current
+    return l ? { x: node.x() + l.x, y: node.y() + l.y } : { x: node.x(), y: node.y() }
   }, [])
 
   const handleDragMove = useCallback(
     (e: KonvaEventObject<DragEvent>) => {
       const node = e.target
+      if (touchesRef.current >= 2) {
+        cancelledDragRef.current = true
+        node.stopDrag()
+        return
+      }
+      // Konva puts the node back under the pointer before every move, so the
+      // lift is added afresh each frame and never accumulates
       if (node.name() === 'ghostBall') {
-        useStore.getState().dragGhostBallTo(node.id(), { x: node.x(), y: node.y() })
+        useStore.getState().dragGhostBallTo(node.id(), lifted(node))
         const it = useStore.getState().scene.items.find((i) => i.id === node.id())
         if (it && it.type === 'ghostBall') node.position({ x: it.x, y: it.y })
         return
       }
       if (node.name() !== 'ball') return // other items just ride the group offset
-      const p = settleBall(node.id(), { x: node.x(), y: node.y() })
+      const p = settleBall(node.id(), lifted(node))
       node.position(p)
       useStore.getState().dragItemTo(node.id(), p)
     },
-    [settleBall],
+    [settleBall, lifted],
   )
 
   const handleDragEnd = useCallback(
     (e: KonvaEventObject<DragEvent>) => {
       const node = e.target
       const st = useStore.getState()
+      // dragend sees the position the last dragmove left, lift included
+      liftRef.current = null
+      if (cancelledDragRef.current) {
+        // a pinch, not a move: put the node back where the scene has it
+        cancelledDragRef.current = false
+        dragStartPos.current = null
+        const it = st.scene.items.find((i) => i.id === node.id())
+        if (it && (it.type === 'ball' || it.type === 'ghostBall')) node.position({ x: it.x, y: it.y })
+        else node.position({ x: 0, y: 0 })
+        return
+      }
       if (node.name() === 'ghostBall') {
         st.dragGhostBallTo(node.id(), { x: node.x(), y: node.y() })
         const it = st.scene.items.find((i) => i.id === node.id())
@@ -459,7 +670,6 @@ export function SceneStage({ stageRef }: SceneStageProps) {
 
   /* -------------------------------------------------------------- render */
 
-  const ready = box.w > 0 && box.h > 0
   const selecting = tool === 'select'
   const selected = items.find((i) => i.id === selectedId)
 
@@ -512,9 +722,9 @@ export function SceneStage({ stageRef }: SceneStageProps) {
           onMouseDown={onPointerDown}
           onTouchStart={onPointerDown}
           onMouseMove={onPointerMove}
-          onTouchMove={onPointerMove}
+          onTouchMove={onTouchMove}
           onMouseUp={onPointerUp}
-          onTouchEnd={onPointerUp}
+          onTouchEnd={onTouchEnd}
           onClick={onStageTap}
           onTap={onStageTap}
         >

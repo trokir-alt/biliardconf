@@ -12,6 +12,7 @@ import { mmToCss, useView } from '../state/view'
 import { itemBounds } from '../model/item'
 import { INK, STROKE_WIDTHS, TEXT_SIZES } from '../model/style'
 import { formatPower } from '../model/item'
+import { useIsMobile } from './useMedia'
 
 export function Properties() {
   const selectedId = useStore((s) => s.selectedId)
@@ -19,6 +20,7 @@ export function Properties() {
   const ballMm = useStore((s) => s.scene.table.ballMm)
   const tool = useStore((s) => s.tool)
   const view = useView()
+  const mobile = useIsMobile()
 
   const pos = useMemo(() => {
     if (!item || !view.layout) return null
@@ -30,9 +32,13 @@ export function Properties() {
       mmToCss(view, { x: b.x, y: b.y + b.h }),
       mmToCss(view, { x: b.x + b.w, y: b.y + b.h }),
     ]
+    const ys = corners.map((c) => c.y)
+    // on a phone: is the object in the lower half of the canvas?
+    const mid = view.stageTop + view.layout.stageH / 2
     return {
       left: Math.min(...corners.map((c) => c.x)),
-      top: Math.max(...corners.map((c) => c.y)) + 12,
+      top: Math.max(...ys) + 12,
+      low: (Math.min(...ys) + Math.max(...ys)) / 2 > mid,
     }
   }, [item, ballMm, view])
 
@@ -55,7 +61,7 @@ export function Properties() {
 
   return (
     <div
-      className="props"
+      className={mobile && pos?.low ? 'props props--top' : 'props'}
       role="toolbar"
       aria-label="Свойства объекта"
       style={pos ? { left: pos.left, top: pos.top } : undefined}
@@ -220,6 +226,16 @@ export function Properties() {
               +
             </button>
           </span>
+        </div>
+      )}
+
+      {mobile && (
+        <div className="props__row props__row--nudge" aria-label="Сдвиг на 5 мм">
+          <button type="button" className="btn btn--icon" onClick={() => st.nudgeSelected(-5, 0)} aria-label="Влево 5 мм">←</button>
+          <button type="button" className="btn btn--icon" onClick={() => st.nudgeSelected(0, -5)} aria-label="Вверх 5 мм">↑</button>
+          <button type="button" className="btn btn--icon" onClick={() => st.nudgeSelected(0, 5)} aria-label="Вниз 5 мм">↓</button>
+          <button type="button" className="btn btn--icon" onClick={() => st.nudgeSelected(5, 0)} aria-label="Вправо 5 мм">→</button>
+          <span className="props__label">5 мм</span>
         </div>
       )}
 

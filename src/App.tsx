@@ -20,6 +20,9 @@ import {
 } from './lib/exportImage'
 import { flushScene, saveScene } from './lib/storage'
 import { useStore } from './state/store'
+import { useView } from './state/view'
+import { useIsMobile } from './ui/useMedia'
+import { MobileShell } from './ui/mobile/MobileShell'
 import './ui/styles.css'
 
 /**
@@ -58,9 +61,12 @@ export function App() {
     return () => clearTimeout(t)
   }, [toast])
 
-  /** drop the selection and give React two frames to redraw without it */
+  const mobile = useIsMobile()
+
+  /** drop the selection and the zoom, and give React two frames to redraw */
   const settle = useCallback(async () => {
     useStore.getState().select(null)
+    useView.getState().resetViewport()
     await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   }, [])
 
@@ -94,6 +100,9 @@ export function App() {
     const stage = stageRef.current
     if (!stage) return
     useStore.getState().select(null)
+    // a zoomed stage would export a crop; renderExport waits two frames for
+    // React to push this reset into the layers before it reads them
+    useView.getState().resetViewport()
     const { title, note } = useStore.getState().scene
     copyExportToClipboard(stage, { pixelRatio: pixelRatioFor(stage, scale), title, note })
       .then(() => setToast({ text: 'Скопировано в буфер', error: false }))
@@ -101,6 +110,19 @@ export function App() {
         setToast({ text: e instanceof Error ? e.message : 'Не удалось скопировать', error: true }),
       )
   }, [])
+
+  if (mobile) {
+    return (
+      <>
+        <MobileShell stageRef={stageRef} onExport={handleExport} onCopy={handleCopy} />
+        {toast && (
+          <div className={toast.error ? 'toast toast--error' : 'toast'} role="status" onClick={() => setToast(null)}>
+            {toast.text}
+          </div>
+        )}
+      </>
+    )
+  }
 
   return (
     <div className="app">

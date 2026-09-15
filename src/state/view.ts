@@ -5,7 +5,8 @@
  */
 
 import { create } from 'zustand'
-import type { StageLayout } from '../render/layout'
+import type { StageLayout, Viewport } from '../render/layout'
+import { VIEWPORT_HOME } from '../render/layout'
 
 export type ViewState = {
   layout: StageLayout | null
@@ -14,8 +15,12 @@ export type ViewState = {
   stageTop: number
   /** the caption currently open in the text editor */
   editingId: string | null
+  /** pinch zoom and pan, screen state only - never part of the scene */
+  viewport: Viewport
   setView: (layout: StageLayout, stageLeft: number, stageTop: number) => void
   setEditing: (id: string | null) => void
+  setViewport: (v: Viewport) => void
+  resetViewport: () => void
 }
 
 export const useView = create<ViewState>()((set) => ({
@@ -23,8 +28,11 @@ export const useView = create<ViewState>()((set) => ({
   stageLeft: 0,
   stageTop: 0,
   editingId: null,
+  viewport: VIEWPORT_HOME,
   setView: (layout, stageLeft, stageTop) => set({ layout, stageLeft, stageTop }),
   setEditing: (id) => set({ editingId: id }),
+  setViewport: (viewport) => set({ viewport }),
+  resetViewport: () => set({ viewport: VIEWPORT_HOME }),
 }))
 
 /** table mm -> css px inside .stage-wrap */

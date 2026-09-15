@@ -18,6 +18,8 @@ export type BallShapeProps = {
   ballMm: number
   selected: boolean
   draggable: boolean
+  /** px per mm; lets the grab area stay at least 44 screen px across */
+  scale?: number
   onSelect: (e: KonvaEventObject<MouseEvent | TouchEvent>) => void
   onDragStart: (e: KonvaEventObject<DragEvent>) => void
   onDragMove: (e: KonvaEventObject<DragEvent>) => void
@@ -39,9 +41,11 @@ function mix(a: string, b: string, t: number): string {
 }
 
 export function BallShape(props: BallShapeProps) {
-  const { item, ballMm, selected, draggable, onSelect, onDragStart, onDragMove, onDragEnd } = props
+  const { item, ballMm, selected, draggable, scale, onSelect, onDragStart, onDragMove, onDragEnd } = props
 
   const r = ballMm / 2
+  // on a phone a ball is ten pixels across; a finger is forty
+  const grabR = scale ? Math.max(r, 22 / scale) : r
   const pal = BALL[item.kind]
 
   // Light comes from the upper left. The shading is deliberately shallow: the
@@ -85,6 +89,7 @@ export function BallShape(props: BallShapeProps) {
       onDragMove={onDragMove}
       onDragEnd={onDragEnd}
     >
+      <Circle radius={grabR} fill="rgba(0,0,0,0)" />
       <Ellipse
         x={r * 0.3}
         y={r * 0.38}
