@@ -195,48 +195,58 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   /* -------------------------------------------------------------- render */
 
   const ready = box.w > 0 && box.h > 0
-  const hint =
-    tool === 'select'
-      ? 'Перетащите шар мышью или пальцем. Стрелки - сдвиг на 5 мм, Shift - на 1 мм.'
-      : 'Нажмите на стол, чтобы поставить шар.'
 
   return (
-    <main className="stage-wrap" ref={wrapRef}>
-      {ready && (
-        <Stage
-          ref={stageRef}
-          width={layout.stageW}
-          height={layout.stageH}
-          onClick={onStageTap}
-          onTap={onStageTap}
-        >
-          <Layer
-            scaleX={layout.scale}
-            scaleY={layout.scale}
-            x={layout.x}
-            y={layout.y}
-            rotation={layout.rotation}
+    <main className="stage-wrap">
+      {/* the canvas gets its own measured box: the hint below is a normal flow
+          item, so on a phone - where the table fills the height - it can never
+          end up printed across the felt */}
+      <div className="stage-wrap__canvas" ref={wrapRef}>
+        {ready && (
+          <Stage
+            ref={stageRef}
+            width={layout.stageW}
+            height={layout.stageH}
+            onClick={onStageTap}
+            onTap={onStageTap}
           >
-            <TableView g={g} />
-            <Group>
-              {items.map((item) => (
-                <ItemView
-                  key={item.id}
-                  item={item}
-                  ballMm={table.ballMm}
-                  selected={item.id === selectedId}
-                  draggable
-                  onSelect={handleSelect}
-                  onDragStart={handleDragStart}
-                  onDragMove={handleDragMove}
-                  onDragEnd={handleDragEnd}
-                />
-              ))}
-            </Group>
-          </Layer>
-        </Stage>
-      )}
-      <p className="stage-wrap__hint">{hint}</p>
+            <Layer
+              scaleX={layout.scale}
+              scaleY={layout.scale}
+              x={layout.x}
+              y={layout.y}
+              rotation={layout.rotation}
+            >
+              <TableView g={g} />
+              <Group>
+                {items.map((item) => (
+                  <ItemView
+                    key={item.id}
+                    item={item}
+                    ballMm={table.ballMm}
+                    selected={item.id === selectedId}
+                    draggable
+                    onSelect={handleSelect}
+                    onDragStart={handleDragStart}
+                    onDragMove={handleDragMove}
+                    onDragEnd={handleDragEnd}
+                  />
+                ))}
+              </Group>
+            </Layer>
+          </Stage>
+        )}
+      </div>
+      <p className="stage-wrap__hint">
+        {tool === 'select' ? (
+          <>
+            <span>Перетащите шар пальцем или мышью.</span>{' '}
+            <span className="stage-wrap__keys">Стрелки - сдвиг на 5 мм, Shift - на 1 мм.</span>
+          </>
+        ) : (
+          <span>Нажмите на стол, чтобы поставить шар.</span>
+        )}
+      </p>
     </main>
   )
 }

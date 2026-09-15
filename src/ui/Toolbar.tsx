@@ -116,6 +116,31 @@ export function Toolbar({ onExport }: ToolbarProps) {
         </div>
       </section>
 
+      <section className="tool-group tool-group--export">
+        <h2 className="tool-group__title">Экспорт</h2>
+        <div className="tool-group__body">
+          <div className="row">
+            <span className="row__label">Размер</span>
+            <span className="seg" role="group" aria-label="Масштаб экспорта">
+              {EXPORT_SCALES.map((scale) => (
+                <button
+                  key={scale}
+                  type="button"
+                  className="btn seg__btn"
+                  aria-pressed={exportScale === scale}
+                  onClick={() => setExportScale(scale)}
+                >
+                  {scale}x
+                </button>
+              ))}
+            </span>
+          </div>
+          <button type="button" className="btn btn--primary" onClick={() => onExport(exportScale)}>
+            Скачать PNG
+          </button>
+        </div>
+      </section>
+
       <section className="tool-group">
         <h2 className="tool-group__title">История</h2>
         <div className="tool-group__body">
@@ -228,30 +253,6 @@ export function Toolbar({ onExport }: ToolbarProps) {
         </div>
       </section>
 
-      <section className="tool-group">
-        <h2 className="tool-group__title">Экспорт</h2>
-        <div className="tool-group__body">
-          <div className="row">
-            <span className="row__label">Размер</span>
-            <span className="seg" role="group" aria-label="Масштаб экспорта">
-              {EXPORT_SCALES.map((scale) => (
-                <button
-                  key={scale}
-                  type="button"
-                  className="btn seg__btn"
-                  aria-pressed={exportScale === scale}
-                  onClick={() => setExportScale(scale)}
-                >
-                  {scale}x
-                </button>
-              ))}
-            </span>
-          </div>
-          <button type="button" className="btn btn--primary" onClick={() => onExport(exportScale)}>
-            Скачать PNG
-          </button>
-        </div>
-      </section>
     </aside>
   )
 }
