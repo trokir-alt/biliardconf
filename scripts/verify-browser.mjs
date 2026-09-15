@@ -502,7 +502,8 @@ async function picture(page, label) {
     const L = window.__layout
     const dpr = canvas.width / parseFloat(layers[0].style.width)
     const img = g.getImageData(0, 0, canvas.width, canvas.height).data
-    const luma = (mx, my) => {
+    // takes a point in table mm; a sample off the canvas is NaN and counts for nothing
+    const luma = ({ x: mx, y: my }) => {
       const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
       const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
       const i = (Math.round(sy * dpr) * canvas.width + Math.round(sx * dpr)) * 4
@@ -541,7 +542,8 @@ async function picture(page, label) {
     }
     // z-order: the watermark group comes after the objects group on its layer
     const wmGroup = window.__stage.find('.watermarks')[0]
-    const above = wmGroup ? wmGroup.getZIndex() > 0 && wmGroup.getParent().className === 'Layer' : false
+    // (nodeType, not className: the production build has no class names)
+    const above = wmGroup ? wmGroup.getZIndex() > 0 && wmGroup.getParent().nodeType === 'Layer' : false
     return {
       text: node ? node.text() : null,
       font: node ? node.fontFamily() : null,
@@ -573,7 +575,8 @@ async function picture(page, label) {
     const L = window.__layout
     const dpr = canvas.width / parseFloat(layers[0].style.width)
     const img = g.getImageData(0, 0, canvas.width, canvas.height).data
-    const luma = (mx, my) => {
+    // takes a point in table mm; a sample off the canvas is NaN and counts for nothing
+    const luma = ({ x: mx, y: my }) => {
       const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
       const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
       const i = (Math.round(sy * dpr) * canvas.width + Math.round(sx * dpr)) * 4
