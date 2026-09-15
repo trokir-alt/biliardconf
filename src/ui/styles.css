@@ -98,6 +98,30 @@ input {
   pointer-events: none;
 }
 
+/*
+ * Export errors. App.tsx renders this inside the flex shell, so it has to be
+ * taken out of flow or it would push the toolbar and the canvas around.
+ * Tapping it dismisses, hence the pointer and the 44 px target.
+ */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 10;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  max-width: min(92vw, 420px);
+  min-height: var(--tap);
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+}
+
 /* ---------------------------------------------------------------- toolbar */
 
 .toolbar {
@@ -391,6 +415,17 @@ kbd {
   .tool-group {
     flex: 0 0 auto;
     min-width: 200px;
+    /* the panel scrolls sideways here, so put the two groups a coach reaches
+       for in the hall - pick a tool, save the picture - within thumb reach */
+    order: 2;
+  }
+
+  .toolbar .tool-group:first-child {
+    order: 0;
+  }
+
+  .toolbar .tool-group:last-child {
+    order: 1;
   }
 
   .toolbar kbd,

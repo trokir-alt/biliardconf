@@ -9,6 +9,7 @@ import type Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { buildGeometry, clampToField } from '../model/table'
 import { resolveOverlap, snapPoint } from '../lib/place'
+import { publishDebug } from '../lib/debug'
 import { useStore } from '../state/store'
 import { ItemView } from './ItemView'
 import { TableView } from './TableView'
@@ -132,6 +133,20 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   const handleSelect = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>) => {
     e.cancelBubble = true
     useStore.getState().select(e.target.id())
+  }, [])
+
+  /* Inspection hook for the browser test suite; a no-op in a normal build. */
+  useEffect(() => {
+    publishDebug('__layout', layout)
+  }, [layout])
+
+  useEffect(() => {
+    const publish = () => {
+      const s = useStore.getState()
+      publishDebug('__scene', { ...s.scene, selectedId: s.selectedId })
+    }
+    publish()
+    return useStore.subscribe(publish)
   }, [])
 
   /* ------------------------------------------------------------ keyboard */

@@ -130,7 +130,7 @@ export function Toolbar({ onExport }: ToolbarProps) {
             <span>Вернуть</span>
             <span className="btn__hint">
               <kbd>Ctrl</kbd>
-              <kbd>⇧</kbd>
+              <kbd>Shift</kbd>
               <kbd>Z</kbd>
             </span>
           </button>

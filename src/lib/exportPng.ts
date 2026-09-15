@@ -88,19 +88,20 @@ const MAX_PIXELS = 16_000_000
 const MAX_SIDE = 8192
 
 /**
- * The caller does not pass 1/2/3 straight through: the "1x" of the UI means a
- * fixed reference width (see App.tsx), so a phone-sized stage legitimately asks
- * for a ratio well above 3. Only the canvas limits below may lower it.
+ * 1x..3x is the whole range the UI offers; anything outside it is a caller bug
+ * or a NaN, so it is clamped rather than trusted. The canvas limits may lower
+ * the ratio further, but never below 1 - a picture smaller than the stage is
+ * worse than no export at all.
  */
 function safePixelRatio(stage: Konva.Stage, wanted: number): number {
-  let ratio = Math.min(16, Math.max(0.25, Number.isFinite(wanted) && wanted > 0 ? wanted : 1))
+  let ratio = Math.min(3, Math.max(1, Number.isFinite(wanted) && wanted > 0 ? wanted : 1))
   const w = stage.width()
   const h = stage.height()
   while (
-    ratio > 0.25 &&
+    ratio > 1 &&
     (w * ratio * h * ratio > MAX_PIXELS || w * ratio > MAX_SIDE || h * ratio > MAX_SIDE)
   ) {
-    ratio = Math.max(0.25, ratio - 0.25)
+    ratio = Math.max(1, ratio - 0.25)
   }
   return ratio
 }
@@ -108,7 +109,7 @@ function safePixelRatio(stage: Konva.Stage, wanted: number): number {
 /** click a temporary anchor; detached anchors do not fire in Firefox */
 function clickDownload(url: string, fileName: string): void {
   const a = document.createElement('a')
-  if (typeof a.download === 'undefined') {
+  if (!('download' in a)) {
     // Old iOS: no download attribute, the best we can do is open the image.
     window.open(url, '_blank')
     return
@@ -138,9 +139,10 @@ export async function downloadStagePng(
   stage: Konva.Stage,
   opts: { pixelRatio: number; fileName: string },
 ): Promise<void> {
-  const pixelRatio = safePixelRatio(stage, opts.pixelRatio)
   try {
-    const canvas = stage.toCanvas({ pixelRatio }) as HTMLCanvasElement
+    // inside the try: reading the stage size can itself throw on a disposed stage
+    const pixelRatio = safePixelRatio(stage, opts.pixelRatio)
+    const canvas = stage.toCanvas({ pixelRatio })
     const blob = await canvasToBlob(canvas)
     if (blob) {
       const url = URL.createObjectURL(blob)
