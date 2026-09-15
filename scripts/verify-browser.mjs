@@ -488,6 +488,45 @@ async function stage3(page, label) {
 /* ------------------------------------- 2. the picture itself, in millimetres */
 
 async function picture(page, label) {
+  // ---- the watermark: on an empty cloth, visible but faint ----
+  await page.evaluate(() => window.__store.getState().newExercise())
+  await page.waitForTimeout(300)
+  const wm = await page.evaluate(() => {
+    const node = window.__stage.find('.watermark')[0]
+    const layers = [...document.querySelectorAll('.konvajs-content canvas')]
+    const canvas = document.createElement('canvas')
+    canvas.width = layers[0].width
+    canvas.height = layers[0].height
+    const g = canvas.getContext('2d')
+    for (const l of layers) g.drawImage(l, 0, 0)
+    const L = window.__layout
+    const dpr = canvas.width / parseFloat(layers[0].style.width)
+    const img = g.getImageData(0, 0, canvas.width, canvas.height).data
+    const luma = (mx, my) => {
+      const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
+      const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
+      const i = (Math.round(sy * dpr) * canvas.width + Math.round(sx * dpr)) * 4
+      return 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2]
+    }
+    const sc = window.__store.getState().scene
+    const cx = sc.table.lengthMm / 2, cy = sc.table.widthMm / 2
+    // the text runs along the screen's horizontal: table x when flat, table y upright
+    const along = (t) => (L.rotation === 90 ? { x: cx + 30, y: cy + t } : { x: cx + t, y: cy + 30 })
+    const base = luma(along(650)) // cloth next to the text, same distance from the centre
+    let glyph = 0, loud = 0, n = 0
+    for (let t = -420; t <= 420; t += 3) {
+      if (Math.abs(t) < 12) continue // the centre line crosses here
+      const d = Math.abs(luma(along(t)) - base)
+      n++
+      if (d >= 4 && d <= 60) glyph++
+      if (d > 60) loud++
+    }
+    return { text: node ? node.text() : null, glyphPct: (glyph / n) * 100, loud }
+  })
+  check(`${label}: the watermark text node is on the table`, wm.text === 'Алексей Соць', String(wm.text))
+  check(`${label}: the watermark is visible on the cloth`, wm.glyphPct >= 8, `${wm.glyphPct.toFixed(0)}% of samples on glyphs`)
+  check(`${label}: ...and faint`, wm.loud === 0, `${wm.loud} loud samples`)
+
   await page.evaluate(() => {
     const st = window.__store.getState()
     st.newExercise()

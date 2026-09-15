@@ -57,6 +57,16 @@ export const METAL = {
 }
 
 export const MARKING = 'rgba(255,255,255,0.38)'
+/** the coach's name, faint on the cloth; it is part of the table, so every
+    export carries it */
+export const WATERMARK = {
+  text: 'Алексей Соць',
+  fill: '#FFFFFF',
+  opacity: 0.16,
+  /** cap height, in mm; the table is 1775 mm across */
+  sizeMm: 120,
+  letterSpacingMm: 6,
+}
 export const MARKING_SPOT = 'rgba(255,255,255,0.72)'
 export const SIGHT = '#F4F0E7'
 export const POCKET_THROAT = '#0A0705'
