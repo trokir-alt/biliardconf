@@ -409,8 +409,12 @@ async function stage3(page, label) {
   await tool(page, 'Выбор')
   const SERIES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
   const inSeries = (v) => SERIES.includes(v)
-  // tap the 7th segment (value 3,5): segments start at x - 210 + 74, 22 wide, 6 gap
-  const seg = (i) => ({ x: pw.x - 210 + 74 + i * 28 + 11, y: pw.y })
+  // the plate is the designer's 140 x 88 artboard scaled to its width:
+  // segments at x = 12 + 13i, 10 wide, in the band from y = 48 down
+  const pwW = pw.widthMm
+  const pwH = (pwW * 88) / 140
+  const art = (ax, ay) => ({ x: pw.x - pwW / 2 + (ax * pwW) / 140, y: pw.y - pwH / 2 + (ay * pwH) / 88 })
+  const seg = (i) => art(12 + 13 * i + 5, 68)
   const [cx7, cy7] = await toPage(page, seg(6).x, seg(6).y)
   await page.mouse.click(cx7, cy7)
   await page.waitForTimeout(150)
@@ -428,17 +432,31 @@ async function stage3(page, label) {
   pv = (await scene(page)).items.find((i) => i.id === pw.id)
   check(`${label}: - stops at 0,5`, pv.value === 0.5, String(pv.value))
   // the + button on the plate itself (right of the plate, when selected)
-  const [bx, by] = await toPage(page, pw.x + 210 + 40, pw.y)
+  const [bx, by] = await toPage(page, pw.x + pwW / 2 + pwW * 0.157 * 0.6, pw.y)
   await page.mouse.click(bx, by)
   await page.waitForTimeout(150)
   pv = (await scene(page)).items.find((i) => i.id === pw.id)
   check(`${label}: + on the plate steps once`, pv.value === 1, String(pv.value))
   check(`${label}: value always belongs to the nine-step series`, inSeries(pv.value))
-  // the text the export renders carries a comma
+  // the digits are curves inside the asset, so the separator is checked by
+  // pixels in stage4(); here we only prove the right asset is chosen
   await page.evaluate((id) => window.__store.getState().setPower(id, 2.5), pw.id)
   await page.waitForTimeout(150)
-  const texts = await page.evaluate(() => window.__stage.find('Text').map((t) => t.text()))
-  check(`${label}: the plate's text node reads "2,5" with a comma`, texts.includes('2,5'), texts.filter((t) => /\d/.test(t)).join(' | '))
+  const plate = await page.evaluate(() => {
+    const im = window.__stage.find('Image').filter((n) => !n.name())[0]
+    return im ? decodeURIComponent(im.image().src).includes('<title>Сила 2,5</title>') : false
+  })
+  check(`${label}: the plate shows the asset for 2,5`, plate === true)
+
+  // the corner handle resizes the plate and keeps its proportions
+  await page.evaluate((id) => window.__store.getState().select(id), pw.id)
+  await page.waitForTimeout(120)
+  const before = (await scene(page)).items.find((i) => i.id === pw.id).widthMm
+  const corner = { x: pw.x + before / 2, y: pw.y + ((before * 88) / 140) / 2 }
+  await gesture(page, corner, { x: corner.x + 90, y: corner.y + 57 })
+  const after = (await scene(page)).items.find((i) => i.id === pw.id).widthMm
+  check(`${label}: the corner handle resizes the indicator`, after > before + 100 && after <= 600, `${before} -> ${after} mm`)
+  await page.evaluate((id) => window.__store.getState().updateItem(id, { widthMm: 444 }), pw.id)
 
   // ---- wireframe ball: placed by a tap, snaps to contact with a real ball ----
   await page.evaluate(() => window.__store.getState().addBall('white', { x: 2000, y: 600 }))
