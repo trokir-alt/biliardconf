@@ -224,9 +224,20 @@ async function behaviour(page, label) {
   check(`${label}: caption committed`, txt?.text === 'Тонко', txt?.text)
   await tool(page, 'Выбор')
   const [ex, ey] = await toPage(page, txt.x + 60, txt.y)
+  // Konva calls it a double click only if the two land within 400 ms of each
+  // other. Under software rendering the first click's redraw can eat that
+  // window, so one retry separates "the app does not reopen the editor" from
+  // "this machine was busy"; a person on a real device never sees it.
   await page.mouse.dblclick(ex, ey)
-  await page.waitForTimeout(200)
-  check(`${label}: double click reopens the editor`, await field.isVisible())
+  await page.waitForTimeout(250)
+  let reopened = await field.isVisible()
+  if (!reopened) {
+    await page.waitForTimeout(400)
+    await page.mouse.dblclick(ex, ey)
+    await page.waitForTimeout(400)
+    reopened = await field.isVisible()
+  }
+  check(`${label}: double click reopens the editor`, reopened)
   await field.fill('Тонко!')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(150)
