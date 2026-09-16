@@ -70,6 +70,9 @@ async function gesture(page, from, to, steps = 18) {
   await page.mouse.move(x0, y0)
   await page.mouse.down()
   await page.mouse.move(x1, y1, { steps })
+  // one more move at the destination: under load the last interpolated move
+  // can be coalesced away, and Konva then commits the position before it
+  await page.mouse.move(x1, y1)
   await page.mouse.up()
   await page.waitForTimeout(150)
 }
@@ -374,6 +377,7 @@ async function stage3(page, label) {
   await page.mouse.move(Math.round(px0), Math.round(py0))
   await page.mouse.down()
   await page.mouse.move(Math.round(px1), Math.round(py1), { steps: 18 })
+  await page.mouse.move(Math.round(px1), Math.round(py1))
   await page.mouse.up()
   await page.waitForTimeout(150)
   const seen = await page.evaluate(
@@ -499,9 +503,20 @@ async function stage3(page, label) {
     y: it.y,
   })
 
-  // dragging it sideways sets both the side and how full the hit is
+  // Dragging it sideways sets both the side and how full the hit is. Grab it
+  // by the crescent that shows, not by its centre: at a half ball the centre
+  // sits exactly on the host's rim, and the host is drawn on top of it.
   const wasAt = { x: hb.x, y: hb.y, size: hb.sizeMm }
-  await gesture(page, compCentre(hb), { x: hb.x + hb.sizeMm * 0.25, y: hb.y })
+  const grabOf = (it) => {
+    const c = compCentre(it)
+    return { x: c.x + 0.55 * (it.sizeMm / 2) * (it.companion.side === 'left' ? -1 : 1), y: c.y }
+  }
+  /** a drag moves the node by the delta, so aim the mouse, not the ball */
+  const dragTo = (it, centreX) => {
+    const g = grabOf(it)
+    return { x: g.x + (centreX - compCentre(it).x), y: g.y }
+  }
+  await gesture(page, grabOf(hb), dragTo(hb, hb.x + hb.sizeMm * 0.25))
   hb = await host()
   check(`${label}: dragging the object ball moves it to the other side`, hb.companion.side === 'right', hb.companion.side)
   check(`${label}: ...and sets how full the hit is`, Math.abs(hb.companion.fullness - 0.75) < 0.02, String(hb.companion.fullness))
@@ -512,7 +527,7 @@ async function stage3(page, label) {
     [0, 0.25, 0.5, 0.75, 0.9].some((f) => Math.abs(f - hb.companion.fullness) < 1e-9), String(hb.companion.fullness))
 
   // a drag that goes up and down cannot lift one ball above the other
-  await gesture(page, compCentre(hb), { x: hb.x + hb.sizeMm * 0.25, y: hb.y - hb.sizeMm * 0.9 })
+  await gesture(page, grabOf(hb), { x: grabOf(hb).x, y: grabOf(hb).y - hb.sizeMm * 0.9 })
   hb = await host()
   check(`${label}: a vertical drag cannot lift one ball above the other`,
     compCentre(hb).y === hb.y && !('angleDeg' in hb.companion), JSON.stringify(hb.companion))
