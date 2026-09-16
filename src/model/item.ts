@@ -7,7 +7,6 @@
 
 import type { Item, StrikePointItem, Vec } from './types'
 import { quadControl } from './style'
-import { POWER_ARTBOARD } from '../brand/assets'
 
 export type Rect = { x: number; y: number; w: number; h: number }
 
@@ -50,11 +49,10 @@ export function itemBounds(item: Item, ballMm: number): Rect {
       return box([item.x, c.x], [item.y, c.y], item.sizeMm / 2)
     }
     case 'power': {
-      // the plate plus its +/- buttons: on the upright table those sit below
-      // the plate, right where a floating panel would otherwise land
+      // the column plus the +/- buttons above and below it
       const { w, h } = powerSize(item)
       const reach = powerButtonReach(w)
-      return { x: item.x - w / 2 - reach, y: item.y - h / 2, w: w + 2 * reach, h }
+      return { x: item.x - w / 2, y: item.y - h / 2 - reach, w, h: h + 2 * reach }
     }
     case 'ghostBall':
       return box([item.x], [item.y], ballMm / 2)
@@ -76,18 +74,41 @@ export function itemBounds(item: Item, ballMm: number): Rect {
 export type Handle = { id: string; at: Vec; kind: 'end' | 'bend' | 'corner' | 'rotate' | 'resize' }
 
 /**
- * The strength indicator, in mm. The designer's artboard is 140 x 88 against a
- * 1120-wide cloth - exactly one eighth of it - so on a 3550 mm table the
- * default plate is 444 x 279 mm.
+ * The strength indicator: one column of nine cells, read bottom to top, in the
+ * units the cells are laid out in.
  */
-export const POWER_RATIO = POWER_ARTBOARD.h / POWER_ARTBOARD.w
-export const POWER_MIN_MM = 300
-export const POWER_MAX_MM = 600
-export const POWER_DEFAULT_MM = 444
+export const POWER_CELLS = 9
+export const POWER_ART = { w: 100, pad: 7, cell: 62, gap: 6 }
+/** 7 + 9*62 + 8*6 + 7 = 620 */
+export const POWER_ART_H = 2 * POWER_ART.pad + POWER_CELLS * POWER_ART.cell + (POWER_CELLS - 1) * POWER_ART.gap
+export const POWER_RATIO = POWER_ART_H / POWER_ART.w
+export const POWER_MIN_MM = 70
+export const POWER_MAX_MM = 170
+export const POWER_DEFAULT_MM = 90
 
 /** width chosen for a table of this length, kept inside the allowed range */
 export function defaultPowerWidth(lengthMm: number): number {
-  return Math.round(Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, lengthMm / 8)))
+  return Math.round(Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, lengthMm / 40)))
+}
+
+/**
+ * The cell a value occupies, counted from the TOP - the hardest shot is the
+ * top of the column, the way a scale like this is read.
+ */
+export function powerCellFromTop(value: number): number {
+  return POWER_CELLS - Math.round(value * 2)
+}
+
+/**
+ * The colour of a cell, by its place on the scale rather than by the value
+ * chosen: green at the bottom for a soft shot, red at the top for a full one.
+ * `spent` cells are the ones this shot reaches; the rest keep the hue and lose
+ * the light, so the column still reads as one scale.
+ */
+export function powerCellColour(fromTop: number, spent: boolean): string {
+  const t = fromTop / (POWER_CELLS - 1) // 0 at the head of the column
+  const hue = Math.round(130 * t) // 0 red at the top, 130 green at the foot
+  return spent ? `hsl(${hue}, 72%, 52%)` : `hsl(${hue}, 42%, 21%)`
 }
 
 export function powerSize(item: { widthMm: number }): { w: number; h: number } {
@@ -95,9 +116,9 @@ export function powerSize(item: { widthMm: number }): { w: number; h: number } {
   return { w, h: w * POWER_RATIO }
 }
 
-/** how far the +/- buttons reach past each end of the plate */
+/** how far the +/- buttons reach above and below the column */
 export function powerButtonReach(w: number): number {
-  return w * 0.157
+  return w * 0.72
 }
 /** the strike-point ball may be resized between these */
 export const STRIKE_MIN_MM = 200
@@ -107,10 +128,55 @@ export const STRIKE_HANDLE_K = 1.3
 
 /* ------------------------------------------- the second ball at the contact */
 
-/** the second ball's angle lands on this grid, in degrees */
-export const COMPANION_STEP_DEG = 15
-/** ...whenever the swing comes this close to a grid line */
-export const COMPANION_SNAP_DEG = 5
+/**
+ * How full the hit is, the way a coach names it: 1 is a full ball, 0.5 is a
+ * half ball (the cue ball's edge on the object ball's centre), 0 is the
+ * thinnest contact there is. These are the values the drag settles onto.
+ */
+export const FULLNESS_STEPS = [
+  { value: 0.9, label: 'Полный' },
+  { value: 0.75, label: '¾' },
+  { value: 0.5, label: '½' },
+  { value: 0.25, label: '¼' },
+  { value: 0, label: 'Тонкий' },
+] as const
+/**
+ * A dead-on full ball would put the two circles exactly on top of each other:
+ * the white one vanishes, the coach sees a single ball and no way to grab it
+ * back. The picture stops at a crescent instead - at 0.9 the cut is under six
+ * degrees, which is a full ball to anyone at the table.
+ */
+export const MAX_FULLNESS = 0.9
+/** ...and how close the drag has to come, as a fraction, to settle on one */
+export const FULLNESS_SNAP = 0.06
+/** a new second ball starts here: the half ball every lesson begins with */
+export const DEFAULT_FULLNESS = 0.5
+
+export function clampFullness(v: number): number {
+  return Number.isFinite(v) ? Math.min(MAX_FULLNESS, Math.max(0, v)) : DEFAULT_FULLNESS
+}
+
+/** which side a horizontal offset means */
+export function sideFromOffset(dx: number, fallback: CompanionSide): CompanionSide {
+  if (Math.abs(dx) < 1e-3) return fallback
+  return dx < 0 ? 'left' : 'right'
+}
+
+/** the named fraction a raw value settles onto, with the magnet on */
+export function settleFullness(v: number, magnet: boolean): number {
+  const f = clampFullness(v)
+  if (!magnet) return Math.round(f * 100) / 100
+  let best = f
+  let bestErr = FULLNESS_SNAP
+  for (const s of FULLNESS_STEPS) {
+    const err = Math.abs(f - s.value)
+    if (err < bestErr) {
+      bestErr = err
+      best = s.value
+    }
+  }
+  return best
+}
 
 /** degrees folded into [0, 360) */
 export function normDeg(deg: number): number {
@@ -118,37 +184,39 @@ export function normDeg(deg: number): number {
   return d < 0 ? d + 360 : d
 }
 
+export type CompanionSide = 'left' | 'right'
+
+/** +1 to the right, -1 to the left, in the widget's own frame */
+export function sideSign(side: CompanionSide): number {
+  return side === 'left' ? -1 : 1
+}
+
 /**
- * The centre of the second ball.
+ * How far apart the two centres are for a given fullness: nothing at a full
+ * ball, one diameter at the thinnest contact. Both balls are the same size by
+ * construction, so there is no second diameter to keep in sync.
+ */
+export function companionGap(sizeMm: number, fullness: number): number {
+  return (1 - clampFullness(fullness)) * sizeMm
+}
+
+/**
+ * The centre of the object ball.
  *
- * Exactly one diameter from the host's centre, because both balls are drawn at
- * the same magnification and touching is the whole statement. There is no
- * second size to keep in sync and no way to end up with a gap.
+ * Only x moves: both balls stand on the cloth, so a vertical offset would draw
+ * one of them floating. The picture cannot express a shot that does not exist.
  */
 export function companionCentre(item: StrikePointItem): Vec {
-  const a = (item.companion ? item.companion.angleDeg : 0) * (Math.PI / 180)
-  return { x: item.x + item.sizeMm * Math.cos(a), y: item.y + item.sizeMm * Math.sin(a) }
+  const c = item.companion
+  const d = companionGap(item.sizeMm, c ? c.fullness : DEFAULT_FULLNESS)
+  return { x: item.x + d * sideSign(c ? c.side : 'right'), y: item.y }
 }
 
-/** Where the two balls meet: the midpoint of the line of centres. */
-export function companionContact(item: StrikePointItem): Vec {
-  const a = (item.companion ? item.companion.angleDeg : 0) * (Math.PI / 180)
-  const r = item.sizeMm / 2
-  return { x: item.x + r * Math.cos(a), y: item.y + r * Math.sin(a) }
+/** The fullness a centre at distance `d` from the host would draw. */
+export function fullnessFromGap(sizeMm: number, d: number): number {
+  return clampFullness(1 - d / Math.max(sizeMm, 1e-6))
 }
 
-/**
- * The angle a swing lands on. Whole degrees, and with the markings magnet on
- * it settles onto a 15-degree grid - the angles a coach names out loud.
- */
-export function settleCompanionAngle(deg: number, magnet: boolean): number {
-  const d = normDeg(deg)
-  if (!magnet) return Math.round(d) % 360
-  // the nearest grid line is at most half a step away, so a plain difference
-  // is already the circular one - even when rounding lands on 360
-  const grid = Math.round(d / COMPANION_STEP_DEG) * COMPANION_STEP_DEG
-  return Math.abs(d - grid) <= COMPANION_SNAP_DEG ? normDeg(grid) : Math.round(d) % 360
-}
 
 export function itemHandles(item: Item): Handle[] {
   switch (item.type) {
@@ -274,7 +342,7 @@ export function settleDot(p: Vec, radiusMm: number): { u: number; v: number } {
   return { u, v }
 }
 
-/** "2,5", "3" - a coach's scale is written with a comma and no trailing zero */
+/** "2,5", "4,0" - a coach's scale, one decimal and a comma, as the brief asks */
 export function formatPower(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace('.', ',')
+  return value.toFixed(1).replace('.', ',')
 }

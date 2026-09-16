@@ -573,10 +573,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
       // on a phone, where the properties strip is cramped, this is the real way
       if (item?.type === 'strikePoint' && !item.companion) {
         const p = pointerMm()
-        if (p) {
-          const deg = (Math.atan2(p.y - item.y, p.x - item.x) * 180) / Math.PI
-          useStore.getState().setCompanion(item.id, deg)
-        }
+        if (p) useStore.getState().setCompanion(item.id, p.x < item.x ? 'left' : 'right')
       }
     },
     [setEditing, pointerMm],
@@ -841,7 +838,7 @@ export function StageHint() {
     return (
       <p className="stage-wrap__hint">
         <span>Нажмите на стол, чтобы поставить шар с точкой удара.</span>{' '}
-        <span className="stage-wrap__keys">Двойной клик по нему - второй шар в точке касания, его можно крутить.</span>
+        <span className="stage-wrap__keys">Двойной клик по нему - прицельный шар сзади; тяните его вбок, чтобы показать, какой частью бьём.</span>
       </p>
     )
   if (tool === 'power' || tool === 'ghost-ball')

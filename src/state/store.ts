@@ -24,7 +24,15 @@ import type {
 } from '../model/types'
 import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE, buildGeometry, clampToField } from '../model/table'
-import { STRIKE_MAX_MM, STRIKE_MIN_MM, itemBounds, normDeg, settleCompanionAngle, translateItem } from '../model/item'
+import {
+  DEFAULT_FULLNESS,
+  STRIKE_MAX_MM,
+  STRIKE_MIN_MM,
+  clampFullness,
+  itemBounds,
+  translateItem,
+  type CompanionSide,
+} from '../model/item'
 import {
   DEFAULT_HEAD,
   DEFAULT_INK,
@@ -116,9 +124,12 @@ export type AppState = {
   setPower: (id: string, value: PowerValue) => void
   adjustPower: (id: string, steps: number) => void
   resetDot: (id: string) => void
-  /** add, swing or remove the second ball at the contact; null removes it */
-  setCompanion: (id: string, angleDeg: number | null) => void
-  rotateCompanion: (id: string, deltaDeg: number) => void
+  /** add, move or remove the object ball behind the widget; null removes it */
+  setCompanion: (id: string, side: CompanionSide | null, fullness?: number) => void
+  /** put it on the other side of the widget */
+  flipCompanion: (id: string) => void
+  /** how full the hit is: 1 a full ball, 0.5 a half ball, 0 the thinnest */
+  setFullness: (id: string, fullness: number) => void
   setStrikeSize: (id: string, mm: number) => void
   /** one history entry; for property changes and finished edits */
   updateItem: (id: string, patch: Partial<Item>) => void
@@ -335,19 +346,30 @@ export const useStore = create<AppState>()(
 
       resetDot: (id) => get().updateItem(id, { dot: { u: 0, v: 0 } } as Partial<Item>),
 
-      setCompanion: (id, angleDeg) => {
+      setCompanion: (id, side, fullness) => {
         const item = get().scene.items.find((i) => i.id === id)
         if (!item || item.type !== 'strikePoint') return
         get().updateItem(id, {
-          companion: angleDeg === null ? undefined : { angleDeg: settleCompanionAngle(angleDeg, false) },
+          companion:
+            side === null
+              ? undefined
+              : { side, fullness: clampFullness(fullness ?? item.companion?.fullness ?? DEFAULT_FULLNESS) },
         } as Partial<Item>)
       },
 
-      rotateCompanion: (id, deltaDeg) => {
+      setFullness: (id, fullness) => {
         const item = get().scene.items.find((i) => i.id === id)
         if (!item || item.type !== 'strikePoint' || !item.companion) return
         get().updateItem(id, {
-          companion: { angleDeg: normDeg(item.companion.angleDeg + deltaDeg) },
+          companion: { side: item.companion.side, fullness: clampFullness(fullness) },
+        } as Partial<Item>)
+      },
+
+      flipCompanion: (id) => {
+        const item = get().scene.items.find((i) => i.id === id)
+        if (!item || item.type !== 'strikePoint' || !item.companion) return
+        get().updateItem(id, {
+          companion: { side: item.companion.side === 'left' ? 'right' : 'left', fullness: item.companion.fullness },
         } as Partial<Item>)
       },
 

@@ -119,16 +119,20 @@ export type StrikePointItem = ItemBase & {
   sizeMm: number
   dot: { u: number; v: number }
   /**
-   * The object ball at the moment of contact, drawn white at the same
-   * magnification as this one.
+   * The object ball, drawn white at the same magnification and BEHIND this
+   * one - the picture a player sees down the shot line, with their own ball in
+   * front of the one they are aiming at.
    *
-   * It is stored as a DIRECTION and never as a position. A silhouette three
-   * millimetres short of contact draws a collision that cannot happen, and at
-   * the scale a phone draws this widget that gap is a third of a pixel:
-   * invisible to the coach, wrong to the pupil. Degrees clockwise from the
-   * table's +x axis; absent means the shot is shown against nothing.
+   * Both balls stand on the cloth, so their centres are at the same height and
+   * the offset between them can only ever be sideways: `side` is which way,
+   * and there is deliberately no way to express one ball above the other,
+   * because no such shot exists.
+   *
+   * How far they overlap is the aim: `fullness` 1 is a full ball, 0.5 is a
+   * half ball - the cue ball's edge on the object ball's centre - and 0 is the
+   * thinnest contact, the two rims just touching.
    */
-  companion?: { angleDeg: number }
+  companion?: { side: 'left' | 'right'; fullness: number }
 }
 
 /** the nine values the strength scale can take; nothing in between */

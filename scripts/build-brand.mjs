@@ -79,11 +79,6 @@ export const SIGN_WHITE_SVG = ${JSON.stringify(checked('sign-white', read('logos
 /** monogram + name in a row, 306 x 72 */
 export const LOGO_HORIZONTAL_WHITE_SVG = ${JSON.stringify(checked('horizontal-white', read('logos/as-horizontal-white.svg')))}
 
-/** the nine states of the strength indicator, index 0 = 0,5 and index 8 = 4,5 */
-export const POWER_SVGS: readonly string[] = [
-${power.map((s) => '  ' + JSON.stringify(s) + ',').join('\n')}
-]
-
 /** the designer's artboard the watermark coordinates are written in */
 export const WATERMARK_ARTBOARD = {
   cloth: { x: ${tokens.watermark.cloth[0]}, y: ${tokens.watermark.cloth[1]}, w: ${tokens.watermark.cloth[2]}, h: ${tokens.watermark.cloth[3]} },
@@ -92,7 +87,11 @@ export const WATERMARK_ARTBOARD = {
   stampH: ${tokens.watermark.stampSize[1]},
 } as const
 
-/** the indicator's own artboard, 140 x 88 = one eighth of the designer's cloth */
+/**
+ * The indicator's own artboard, 140 x 88 = one eighth of the designer's cloth.
+ * Only the geometry is taken from the package: the plate itself is drawn in
+ * Konva so it carries the same light and materials as the rest of the table.
+ */
 export const POWER_ARTBOARD = { w: ${tokens.indicator.width}, h: ${tokens.indicator.height} } as const
 
 export const BRAND = {

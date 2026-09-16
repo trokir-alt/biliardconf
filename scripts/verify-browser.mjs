@@ -409,12 +409,18 @@ async function stage3(page, label) {
   await tool(page, 'Выбор')
   const SERIES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
   const inSeries = (v) => SERIES.includes(v)
-  // the plate is the designer's 140 x 88 artboard scaled to its width:
-  // segments at x = 12 + 13i, 10 wide, in the band from y = 48 down
+  // the scale is one column of nine cells, read bottom to top: artboard 100
+  // wide, 7 of padding, cells 62 tall with 6 between them
+  const ART = { w: 100, pad: 7, cell: 62, gap: 6, h: 620 }
   const pwW = pw.widthMm
-  const pwH = (pwW * 88) / 140
-  const art = (ax, ay) => ({ x: pw.x - pwW / 2 + (ax * pwW) / 140, y: pw.y - pwH / 2 + (ay * pwH) / 88 })
-  const seg = (i) => art(12 + 13 * i + 5, 68)
+  const pwH = (pwW * ART.h) / ART.w
+  const u = pwW / ART.w
+  /** the middle of the cell a value sits in, counted from the top */
+  const cellOf = (value) => {
+    const fromTop = 9 - Math.round(value * 2)
+    return { x: pw.x, y: pw.y - pwH / 2 + (ART.pad + fromTop * (ART.cell + ART.gap) + ART.cell / 2) * u }
+  }
+  const seg = (i) => cellOf(SERIES[i])
   const [cx7, cy7] = await toPage(page, seg(6).x, seg(6).y)
   await page.mouse.click(cx7, cy7)
   await page.waitForTimeout(150)
@@ -431,34 +437,33 @@ async function stage3(page, label) {
   await page.waitForTimeout(100)
   pv = (await scene(page)).items.find((i) => i.id === pw.id)
   check(`${label}: - stops at 0,5`, pv.value === 0.5, String(pv.value))
-  // the + button on the plate itself (right of the plate, when selected)
-  const [bx, by] = await toPage(page, pw.x + pwW / 2 + pwW * 0.157 * 0.6, pw.y)
+  // the + button on the plate itself (above the column, when selected)
+  const [bx, by] = await toPage(page, pw.x, pw.y - pwH / 2 - pwW * 0.72 * 0.55)
   await page.mouse.click(bx, by)
   await page.waitForTimeout(150)
   pv = (await scene(page)).items.find((i) => i.id === pw.id)
   check(`${label}: + on the plate steps once`, pv.value === 1, String(pv.value))
   check(`${label}: value always belongs to the nine-step series`, inSeries(pv.value))
-  // the digits are curves inside the asset, so the separator is checked by
-  // pixels in stage4(); here we only prove the right asset is chosen
+  // the value lives in the topmost lit cell; the separator is checked by
+  // pixels in stage4()
   await page.evaluate((id) => window.__store.getState().setPower(id, 2.5), pw.id)
   await page.waitForTimeout(150)
-  const plate = await page.evaluate(() => {
-    const im = window.__stage.find('Image').filter((n) => !n.name())[0]
-    return im ? decodeURIComponent(im.image().src).includes('<title>Сила 2,5</title>') : false
-  })
-  check(`${label}: the plate shows the asset for 2,5`, plate === true)
+  const plate = await page.evaluate(() => window.__stage.find('Text').map((t) => t.text()))
+  check(`${label}: the plate reads 2,5`, plate.includes('2,5'), plate.filter((t) => /\d/.test(t)).join(' | '))
 
   // the corner handle resizes the plate and keeps its proportions
   await page.evaluate((id) => window.__store.getState().select(id), pw.id)
   await page.waitForTimeout(120)
+  await page.evaluate((id) => window.__store.getState().updateItem(id, { widthMm: 90 }), pw.id)
+  await page.waitForTimeout(120)
   const before = (await scene(page)).items.find((i) => i.id === pw.id).widthMm
-  const corner = { x: pw.x + before / 2, y: pw.y + ((before * 88) / 140) / 2 }
-  await gesture(page, corner, { x: corner.x + 90, y: corner.y + 57 })
+  const corner = { x: pw.x + before / 2, y: pw.y + (before * ART.h) / ART.w / 2 }
+  await gesture(page, corner, { x: corner.x + 30, y: corner.y + 186 })
   const after = (await scene(page)).items.find((i) => i.id === pw.id).widthMm
-  check(`${label}: the corner handle resizes the indicator`, after > before + 100 && after <= 600, `${before} -> ${after} mm`)
-  await page.evaluate((id) => window.__store.getState().updateItem(id, { widthMm: 444 }), pw.id)
+  check(`${label}: the corner handle resizes the indicator`, after > before + 15 && after <= 170, `${before} -> ${after} mm`)
+  await page.evaluate((id) => window.__store.getState().updateItem(id, { widthMm: 120 }), pw.id)
 
-  // ---- the second ball at the contact: born touching, stays touching ----
+  // ---- the object ball behind the widget: the aiming picture ----
   await page.evaluate(() => {
     const st = window.__store.getState()
     st.addItem({ id: 'cb-host', type: 'strikePoint', x: 1200, y: 1300, sizeMm: 300, dot: { u: 0, v: 0 } }, 'belowText')
@@ -467,38 +472,42 @@ async function stage3(page, label) {
   await page.waitForTimeout(150)
   const host = () => scene(page).then((sc) => sc.items.find((i) => i.id === 'cb-host'))
   let hb = await host()
-  check(`${label}: a strike widget starts with no second ball`, hb.companion === undefined)
+  check(`${label}: a strike widget starts with no object ball`, hb.companion === undefined)
 
-  // two taps on the left of the widget put it on the left
+  // two taps on the left of the widget put it on the left, at a half ball
   const [cdx, cdy] = await toPage(page, hb.x - hb.sizeMm * 0.35, hb.y)
   await page.mouse.dblclick(cdx, cdy)
   await page.waitForTimeout(300)
   hb = await host()
-  check(`${label}: a double click adds the second ball on the side clicked`,
-    !!hb.companion && Math.abs(((hb.companion.angleDeg - 180 + 540) % 360) - 180) <= 20,
-    hb.companion ? `${hb.companion.angleDeg}°` : 'none')
+  check(`${label}: a double click adds the object ball on the side clicked`, hb.companion?.side === 'left', JSON.stringify(hb.companion))
+  check(`${label}: it starts at a half ball`, hb.companion?.fullness === 0.5, String(hb.companion?.fullness))
 
-  /** the second ball's centre, from the angle alone */
+  /** where the object ball's centre is: sideways only, and how far IS the aim */
   const compCentre = (it) => ({
-    x: it.x + it.sizeMm * Math.cos((it.companion.angleDeg * Math.PI) / 180),
-    y: it.y + it.sizeMm * Math.sin((it.companion.angleDeg * Math.PI) / 180),
+    x: it.x + (1 - it.companion.fullness) * it.sizeMm * (it.companion.side === 'left' ? -1 : 1),
+    y: it.y,
   })
-  const gap = (it) => Math.hypot(compCentre(it).x - it.x, compCentre(it).y - it.y) - it.sizeMm
-  check(`${label}: the two balls touch exactly`, Math.abs(gap(hb)) < 1e-6, `${gap(hb).toExponential(1)} mm`)
 
-  // swing it by dragging the white ball; only the angle may change
+  // dragging it sideways sets both the side and how full the hit is
   const wasAt = { x: hb.x, y: hb.y, size: hb.sizeMm }
-  await gesture(page, compCentre(hb), { x: hb.x + 10, y: hb.y - hb.sizeMm })
+  await gesture(page, compCentre(hb), { x: hb.x + hb.sizeMm * 0.25, y: hb.y })
   hb = await host()
-  check(`${label}: dragging the second ball swings it`, Math.abs(((hb.companion.angleDeg - 270 + 540) % 360) - 180) <= 8, `${hb.companion.angleDeg}°`)
-  check(`${label}: swinging it does not move or resize the widget`,
+  check(`${label}: dragging the object ball moves it to the other side`, hb.companion.side === 'right', hb.companion.side)
+  check(`${label}: ...and sets how full the hit is`, Math.abs(hb.companion.fullness - 0.75) < 0.02, String(hb.companion.fullness))
+  check(`${label}: dragging it does not move or resize the widget`,
     Math.abs(hb.x - wasAt.x) < 0.01 && Math.abs(hb.y - wasAt.y) < 0.01 && hb.sizeMm === wasAt.size,
     `${hb.x.toFixed(1)},${hb.y.toFixed(1)} Ø${hb.sizeMm}`)
-  check(`${label}: the swing lands on the 15 degree grid`, hb.companion.angleDeg % 15 === 0, `${hb.companion.angleDeg}°`)
-  check(`${label}: ...and it is still touching`, Math.abs(gap(hb)) < 1e-6)
+  check(`${label}: the drag lands on a named fraction`,
+    [0, 0.25, 0.5, 0.75, 0.9].some((f) => Math.abs(f - hb.companion.fullness) < 1e-9), String(hb.companion.fullness))
 
-  // the pair is rigid: move and resize the host, contact holds
-  await page.evaluate(() => window.__store.getState().nudgeSelected(0, 0))
+  // a drag that goes up and down cannot lift one ball above the other
+  await gesture(page, compCentre(hb), { x: hb.x + hb.sizeMm * 0.25, y: hb.y - hb.sizeMm * 0.9 })
+  hb = await host()
+  check(`${label}: a vertical drag cannot lift one ball above the other`,
+    compCentre(hb).y === hb.y && !('angleDeg' in hb.companion), JSON.stringify(hb.companion))
+
+  // the pair is rigid: move and resize the host, the aim is unchanged
+  const aimBefore = hb.companion.fullness
   await page.evaluate((id) => {
     const st = window.__store.getState()
     st.select(id)
@@ -508,65 +517,73 @@ async function stage3(page, label) {
   await page.waitForTimeout(150)
   hb = await host()
   check(`${label}: the pair stays rigid when the widget moves and grows`,
-    Math.abs(gap(hb)) < 1e-6 && hb.sizeMm === 500, `Ø${hb.sizeMm}, gap ${gap(hb).toExponential(1)}`)
+    hb.companion.fullness === aimBefore && hb.sizeMm === 500 && compCentre(hb).y === hb.y, `Ø${hb.sizeMm}, ${hb.companion.fullness}`)
 
-  // the picture: white ball against a warm host, and no cloth between them
+  // the picture: white behind, the widget in front, no cloth between them
   const seam = await page.evaluate(
     (SAMPLER) => {
       const at = eval(SAMPLER)
       const it = window.__store.getState().scene.items.find((i) => i.id === 'cb-host')
-      const a = (it.companion.angleDeg * Math.PI) / 180
-      const c = { x: it.x + it.sizeMm * Math.cos(a), y: it.y + it.sizeMm * Math.sin(a) }
-      const cloth = at(it.x - it.sizeMm * 2.2, it.y)
-      const white = at(c.x, c.y)
-      const warm = at(it.x, it.y)
-      // walk the line of centres: no sample may read as bare cloth, or the
-      // two balls are not touching
+      const dir = it.companion.side === 'left' ? -1 : 1
+      const d = (1 - it.companion.fullness) * it.sizeMm
+      const r = it.sizeMm / 2
+      const c = { x: it.x + d * dir, y: it.y }
+      const cloth = at(it.x - it.sizeMm * 2.4, it.y)
+      // the crescent that still shows, beyond the object ball's centre
+      const crescent = at(c.x + r * 0.7 * dir, c.y)
+      // a point inside BOTH circles: the widget must be the one drawn there
+      const overlap = at(it.x + d * 0.5 * dir, it.y)
       let clothy = 0
       let n = 0
-      for (let t = 0.12; t <= 0.88; t += 0.01) {
-        const p = at(it.x + (c.x - it.x) * t, it.y + (c.y - it.y) * t)
+      for (let t = 0; t <= 1; t += 0.02) {
+        const p = at(it.x + (c.x - it.x) * t, it.y)
         if (!p || !cloth) continue
         n++
-        const d = Math.max(Math.abs(p[0] - cloth[0]), Math.abs(p[1] - cloth[1]), Math.abs(p[2] - cloth[2]))
-        if (d < 30) clothy++
+        const diff = Math.max(Math.abs(p[0] - cloth[0]), Math.abs(p[1] - cloth[1]), Math.abs(p[2] - cloth[2]))
+        if (diff < 30) clothy++
       }
-      return { white, warm, clothy, n }
+      return { crescent, overlap, clothy, n }
     },
     S4_SAMPLER,
   )
-  check(`${label}: the second ball is flat white, not a second cue ball`,
-    seam.white && seam.white[0] > 235 && seam.white[1] > 235 && seam.white[2] > 235 && Math.abs(seam.white[0] - seam.white[2]) <= 10,
-    `white ${seam.white} vs host ${seam.warm}`)
-  check(`${label}: the host still reads warm against it`, seam.warm && seam.warm[0] - seam.warm[2] > 40, `r-b ${seam.warm ? seam.warm[0] - seam.warm[2] : '?'}`)
+  check(`${label}: the object ball reads as a white ball, not a flat disc`,
+    seam.crescent && seam.crescent[0] > 200 && seam.crescent[0] < 253 && Math.abs(seam.crescent[0] - seam.crescent[2]) <= 12,
+    `crescent ${seam.crescent}`)
+  check(`${label}: the widget with the dot is drawn OVER the object ball`,
+    seam.overlap && seam.overlap[0] - seam.overlap[2] > 40, `overlap r-b ${seam.overlap ? seam.overlap[0] - seam.overlap[2] : '?'}`)
   check(`${label}: no cloth shows between the two balls`, seam.clothy === 0, `${seam.clothy} of ${seam.n} samples`)
 
-  // the buttons, and removal that outlives a reload
+  // the named fractions, the sides, and removal that outlives a reload
   await page.evaluate((id) => window.__store.getState().select(id), 'cb-host')
   await page.waitForTimeout(120)
-  const angBefore = (await host()).companion.angleDeg
-  await page.getByRole('button', { name: 'Перевернуть' }).click()
+  for (const [name, value] of [['Полный', 0.9], ['½', 0.5], ['Тонкий', 0]]) {
+    await page.getByRole('button', { name, exact: true }).click()
+    await page.waitForTimeout(120)
+    const f = (await host()).companion.fullness
+    check(`${label}: "${name}" sets the aim to ${value}`, f === value, String(f))
+  }
+  await page.getByRole('button', { name: '¾', exact: true }).click()
+  await page.waitForTimeout(120)
+  await page.getByRole('button', { name: 'Слева', exact: true }).click()
   await page.waitForTimeout(150)
-  check(`${label}: "flip" puts the second ball on the other side`,
-    (await host()).companion.angleDeg === (angBefore + 180) % 360, `${angBefore}° -> ${(await host()).companion.angleDeg}°`)
-  await page.getByRole('button', { name: 'По часовой на 15 градусов' }).click()
+  check(`${label}: "left" puts the object ball on the left, aim unchanged`,
+    (await host()).companion.side === 'left' && (await host()).companion.fullness === 0.75)
+  await page.getByRole('button', { name: 'Справа', exact: true }).click()
   await page.waitForTimeout(150)
-  check(`${label}: the step button turns it by 15 degrees`, (await host()).companion.angleDeg === (angBefore + 195) % 360)
+  check(`${label}: "right" puts it back`, (await host()).companion.side === 'right')
   await page.keyboard.press('Control+z')
   await page.waitForTimeout(150)
-  check(`${label}: undo takes the turn back`, (await host()).companion.angleDeg === (angBefore + 180) % 360)
+  check(`${label}: undo takes the side back`, (await host()).companion.side === 'left')
   await page.waitForTimeout(700)
   await page.reload({ waitUntil: 'networkidle' })
   await page.waitForTimeout(700)
-  check(`${label}: the second ball survives a reload`, (await host())?.companion?.angleDeg === (angBefore + 180) % 360)
-  await page.evaluate(() => {
-    const st = window.__store.getState()
-    st.select('cb-host')
-  })
+  const kept = (await host())?.companion
+  check(`${label}: the object ball survives a reload`, kept?.side === 'left' && kept?.fullness === 0.75, JSON.stringify(kept))
+  await page.evaluate(() => window.__store.getState().select('cb-host'))
   await page.waitForTimeout(120)
   await page.getByRole('button', { name: 'Убрать' }).click()
   await page.waitForTimeout(150)
-  check(`${label}: "remove" takes the second ball away`, (await host()).companion === undefined)
+  check(`${label}: "remove" takes the object ball away`, (await host()).companion === undefined)
   await page.evaluate(() => {
     const st = window.__store.getState()
     st.select('cb-host')
@@ -652,7 +669,7 @@ const S4_SCENE = () => {
     count: 4, autoCount: false, head: false, color: '#FFFFFF',
   })
   st.addItem({ id: 's4-zone', type: 'zone', x: (620 - 40) * s, y: (430 - 40) * s, w: 300 * s, h: 120 * s, shape: 'rect', color: '#F5A623', opacity: 0.25 }, 'bottom')
-  st.addItem({ id: 's4-power', type: 'power', x: L * 0.75, y: (500 - 40) * s, value: 4, widthMm: 600 }, 'belowText')
+  st.addItem({ id: 's4-power', type: 'power', x: L * 0.78, y: st.scene.table.widthMm / 2, value: 4, widthMm: 150 }, 'belowText')
   st.select(null)
   return stamp
 }
@@ -797,14 +814,15 @@ async function stage4(page, label) {
         const at = eval(SAMPLER)
         const it = window.__store.getState().scene.items.find((i) => i.id === 's4-power')
         const W = it.widthMm
-        const H = (W * 88) / 140
-        const sx = W / 140
-        const sy = H / 88
+        const ART = { w: 100, pad: 7, cell: 62, gap: 6, h: 620 }
+        const H = (W * ART.h) / ART.w
+        const u = W / ART.w
         let filled = 0
-        for (let i = 0; i < 9; i++) {
-          const c = at(it.x - W / 2 + (12 + 13 * i + 5) * sx, it.y - H / 2 + 65 * sy)
-          // a filled segment is white inside, an empty one shows the plate
-          if (c && c[0] > 200 && c[1] > 200 && c[2] > 200) filled++
+        for (let ft = 0; ft < 9; ft++) {
+          const c = at(it.x, it.y - H / 2 + (ART.pad + ft * (ART.cell + ART.gap) + ART.cell / 2) * u)
+          // a cell the shot reaches is lit; the rest keep the hue and lose the
+          // light, so the brightest channel tells them apart outright
+          if (c && Math.max(c[0], c[1], c[2]) > 150) filled++
         }
         out.push({ v, filled })
       }
@@ -824,27 +842,36 @@ async function stage4(page, label) {
           const at = eval(SAMPLER)
           const it = window.__store.getState().scene.items.find((i) => i.id === 's4-power')
           const W = it.widthMm
-          const H = (W * 88) / 140
-          const sx = W / 140
-          const sy = H / 88
-          const ink = (x0, x1, y0, y1) => {
-            let n = 0
-            for (let x = x0; x <= x1; x += 0.5)
-              for (let y = y0; y <= y1; y += 0.5) {
-                const c = at(it.x - W / 2 + x * sx, it.y - H / 2 + y * sy)
-                if (c && c[0] > 200 && c[1] > 200 && c[2] > 200) n++
-              }
-            return n
+          const ART = { w: 100, pad: 7, cell: 62, gap: 6, h: 620 }
+          const H = (W * ART.h) / ART.w
+          const u = W / ART.w
+          // the value is written in the topmost lit cell
+          const fromTop = 9 - Math.round(it.value * 2)
+          const top = it.y - H / 2 + (ART.pad + fromTop * (ART.cell + ART.gap)) * u
+          const cell = ART.cell * u
+          const white = (x, y) => {
+            const c = at(x, y)
+            return !!c && c[0] > 230 && c[1] > 230 && c[2] > 230
           }
-          // the digits sit on the baseline at y = 38; only a comma puts ink
-          // below it, and it does so between the two digits
-          resolve({ below: ink(62, 70, 39.5, 43), underDigits: ink(46, 60, 39.5, 43) })
+          /** how far down the cell the ink reaches in this column band */
+          const lowest = (f0, f1) => {
+            let low = -1
+            for (let f = f0; f <= f1; f += 0.01)
+              for (let t = 0.05; t <= 0.98; t += 0.01)
+                if (white(it.x - W / 2 + (ART.pad + f * (ART.w - 2 * ART.pad)) * u, top + t * cell) && t > low) low = t
+            return low
+          }
+          // "2,5" is centred, so the separator is the middle band. A digit
+          // stops at the baseline; only a comma carries a tail below it.
+          resolve({ separator: lowest(0.44, 0.6), digit: lowest(0.16, 0.36) })
         }, 120),
       )
     },
     S4_SAMPLER,
   )
-  check(`${label}: the decimal mark is a comma, with a tail below the baseline`, comma.below > 0 && comma.underDigits === 0, `${comma.below} samples below the separator, ${comma.underDigits} under the digits`)
+  check(`${label}: the decimal mark is a comma, with a tail below the baseline`,
+    comma.digit > 0 && comma.separator > comma.digit + 0.03,
+    `separator reaches ${comma.separator.toFixed(2)} of the cell, digits stop at ${comma.digit.toFixed(2)}`)
 
   // ---- density: the preset changes the count and outlives a reload ----
   const counts = await page.evaluate(async () => {

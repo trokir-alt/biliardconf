@@ -6,7 +6,7 @@
  * branch in ItemView.
  */
 
-import { Circle, Ellipse, Group, Image as KImage, Line as KLine, Rect, Shape, Text } from 'react-konva'
+import { Circle, Ellipse, Group, Line as KLine, Rect, Shape, Text } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
 import type { Shape as KonvaShape } from 'konva/lib/Shape'
 import type { KonvaEventObject } from 'konva/lib/Node'
@@ -22,10 +22,24 @@ import type {
   ZoneItem,
 } from '../model/types'
 import { POWER_VALUES } from '../model/types'
-import { arrowCurve, powerButtonReach, powerSize, settleCompanionAngle, settleDot } from '../model/item'
-import { BRAND, POWER_ARTBOARD, POWER_SVGS } from '../brand/assets'
-import { svgImage, useSvgImages } from '../brand/svgImage'
-import { CANVAS_FONT } from '../model/fonts'
+import {
+  DEFAULT_FULLNESS,
+  POWER_ART,
+  arrowCurve,
+  companionGap,
+  formatPower,
+  fullnessFromGap,
+  powerButtonReach,
+  powerCellColour,
+  powerCellFromTop,
+  powerSize,
+  settleDot,
+  settleFullness,
+  sideFromOffset,
+  sideSign,
+} from '../model/item'
+import { BRAND } from '../brand/assets'
+import { BRAND_FONT, CANVAS_FONT } from '../model/fonts'
 import { BALL } from '../model/theme'
 
 /** dashes scale with the stroke, so a thin dashed line never looks like a rash */
@@ -206,6 +220,11 @@ export function TextShape({ item }: { item: TextItem }) {
 
 const ORANGE = '#F5A623'
 const DOT_RED = '#E5322D'
+/** the light the sights and the pocket rims are cut from */
+const CREAM = '#E8E2D0'
+/** the brand navy, lit from above and shaded below */
+const PLATE_TOP = '#22485F'
+const PLATE_BOTTOM = '#0E2231'
 
 export type StrikePointProps = {
   item: StrikePointItem
@@ -214,8 +233,8 @@ export type StrikePointProps = {
   /** live while dragging, final on release */
   onDot: (dot: { u: number; v: number }, final: boolean) => void
   onDotStart: () => void
-  /** the swing of the second ball, in degrees; final on release */
-  onCompanion: (angleDeg: number, final: boolean) => void
+  /** where the second ball is dragged to: a side and a fullness */
+  onCompanion: (side: 'left' | 'right', fullness: number, final: boolean) => void
   onCompanionStart: () => void
   /** whether the angle settles onto the 15-degree grid */
   magnet: boolean
@@ -228,10 +247,12 @@ export type StrikePointProps = {
  */
 export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, onCompanionStart, magnet }: StrikePointProps) {
   const r = item.sizeMm / 2
-  const angle = (item.companion ? item.companion.angleDeg : 0) * (Math.PI / 180)
-  // the second ball's centre in the host's own frame: one diameter out, so the
-  // two rims meet exactly, whatever the size
-  const cc = { x: 2 * r * Math.cos(angle), y: 2 * r * Math.sin(angle) }
+  // The object ball's centre in the host's own frame. Only x moves: both balls
+  // stand on the cloth, so their centres are at the same height and one can
+  // never be drawn above the other. How far out it sits IS the aim.
+  const side = item.companion ? item.companion.side : 'right'
+  const gapMm = companionGap(item.sizeMm, item.companion ? item.companion.fullness : DEFAULT_FULLNESS)
+  const cc = { x: gapMm * sideSign(side), y: 0 }
   const dotR = item.sizeMm / 16
   // a grab area of at least 44 screen px, however small the dot is drawn
   const grabR = Math.max(dotR, 22 / Math.max(scale, 1e-6))
@@ -248,13 +269,14 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
   const swing = (e: KonvaEventObject<DragEvent>, final: boolean) => {
     e.cancelBubble = true
     const node = e.target
-    const deg = (Math.atan2(node.y(), node.x()) * 180) / Math.PI
-    const settled = settleCompanionAngle(deg, magnet)
-    const a = settled * (Math.PI / 180)
-    // straight back onto its circle, so the magnet is visible while swinging
-    // rather than only on release
-    node.position({ x: 2 * r * Math.cos(a), y: 2 * r * Math.sin(a) })
-    onCompanion(settled, final)
+    // the vertical part of the drag is thrown away, not clamped: there is no
+    // shot in which one ball sits above the other
+    const s = sideFromOffset(node.x(), side)
+    const f = settleFullness(fullnessFromGap(item.sizeMm, Math.abs(node.x())), magnet)
+    // straight back onto the geometry, so the named fractions are visible
+    // while dragging rather than only on release
+    node.position({ x: companionGap(item.sizeMm, f) * sideSign(s), y: 0 })
+    onCompanion(s, f, final)
   }
   const ring = (k: number) => (
     <Circle key={k} radius={r * k} stroke="rgba(0,0,0,0.55)" strokeWidth={1.6} listening={false} />
@@ -268,8 +290,8 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
           whichever side the ball is on. */}
       {item.companion && (
         <Ellipse
-          x={cc.x + r * 0.3 + r * 0.28 * Math.cos(angle)}
-          y={cc.y + r * 0.38 + r * 0.28 * Math.sin(angle)}
+          x={cc.x + r * 0.3 + r * 0.28 * sideSign(side)}
+          y={cc.y + r * 0.38}
           radiusX={r * 0.94}
           radiusY={r * 0.68}
           fillRadialGradientStartPoint={{ x: 0, y: 0 }}
@@ -293,12 +315,14 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
         fillRadialGradientColorStops={[0, 'rgba(0,0,0,0.34)', 0.55, 'rgba(0,0,0,0.14)', 1, 'rgba(0,0,0,0)']}
         listening={false}
       />
-      {/* The object ball: flat white and bare, with no rings, no dot and no
-          modelling. Shaded like the host it would read as a second cue ball and
-          the point - this is the ball being HIT, not the one being struck -
-          would be lost. It is drawn before the host, so the host's own rim
-          draws the seam as one line. Dragging it swings it; it cannot come
-          off, and it cannot end up a hair short of contact. */}
+      {/* The object ball: a plain white ball, with none of the host's rings and
+          no red dot - those say where the CUE hits, and putting them on both
+          balls would lose which one is being struck.
+
+          It is drawn BEFORE the host, so the host covers it: that is the
+          picture a player sees down the shot line, and how much of the white
+          ball still shows is exactly the aim. Dragging it sets both the side
+          and that fraction. */}
       {item.companion && (
         <Group
           name="companion"
@@ -314,7 +338,46 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
           onDragMove={(e) => swing(e, false)}
           onDragEnd={(e) => swing(e, true)}
         >
-          <Circle radius={r} fill={BALL.white.base} stroke="rgba(0,0,0,0.6)" strokeWidth={2} />
+          {/* Modelled like every other ball in the app, one lamp from the upper
+              left, but pulled a shade darker than a ball on the cloth: at this
+              magnification a pure white disc next to the yellow one glares and
+              flattens the picture. */}
+          <Circle
+            radius={r}
+            fillRadialGradientStartPoint={{ x: -r * 0.2, y: -r * 0.22 }}
+            fillRadialGradientStartRadius={r * 0.06}
+            fillRadialGradientEndPoint={{ x: r * 0.04, y: r * 0.06 }}
+            fillRadialGradientEndRadius={r * 1.06}
+            fillRadialGradientColorStops={[0, '#FDFDFD', 0.34, '#EFF1F2', 0.8, '#DDE1E4', 1, '#B9BFC4']}
+            stroke="rgba(0,0,0,0.6)"
+            strokeWidth={2}
+          />
+          {/* a thin rim of its own, so the ball keeps an edge where it leaves
+              the widget and meets the cloth */}
+          <Circle radius={r} stroke={BALL.white.rim} strokeWidth={1.6} opacity={0.45} listening={false} />
+          {/* the same specular the balls on the cloth carry */}
+          <Ellipse
+            x={-r * 0.36}
+            y={-r * 0.42}
+            radiusX={r * 0.3}
+            radiusY={r * 0.2}
+            rotation={-28}
+            fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+            fillRadialGradientStartRadius={0}
+            fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+            fillRadialGradientEndRadius={r * 0.3}
+            fillRadialGradientColorStops={[
+              0,
+              'rgba(255,255,255,0.8)',
+              0.4,
+              'rgba(255,255,255,0.4)',
+              0.7,
+              'rgba(255,255,255,0.07)',
+              1,
+              'rgba(255,255,255,0)',
+            ]}
+            listening={false}
+          />
         </Group>
       )}
       <Circle
@@ -351,19 +414,6 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
   )
 }
 
-/**
- * The designer's segment geometry, in artboard units: nine boxes at
- * x = 12 + 13i, y = 56, 10 wide. Only the tap targets are rebuilt here - the
- * picture itself is the SVG the package ships.
- */
-const SEG_X0 = 12
-const SEG_PITCH = 13
-const SEG_W = 10
-/** the band the segments live in; the digits sit above it and stay tappable
-    only as "select the plate", not as "set a value" */
-const SEG_BAND_TOP = 48
-const SEG_BAND_BOTTOM = 88
-
 export type PowerProps = {
   item: PowerItem
   selected: boolean
@@ -372,29 +422,37 @@ export type PowerProps = {
 }
 
 /**
- * The strength indicator: the designer's own artboard, drawn as an image.
+ * The strength indicator: one column of nine cells, read bottom to top.
  *
- * Nine states ship as nine SVG documents, so the picture is never redrawn by
- * hand here - `2 * value` filled segments and the digits with a comma are
- * baked into the asset. What this component adds is the things an asset
- * cannot carry: the tap targets over the segments and the +/- buttons that
- * appear when the plate is selected.
+ * The scale is a colour, not a count - green at the foot for a soft shot, red
+ * at the head for a full one - and the cells the shot reaches are lit while
+ * the rest keep the hue and lose the light, so the column still reads as one
+ * scale rather than two. The number sits in the topmost lit cell, which is the
+ * value itself: nothing to cross-reference.
+ *
+ * Nothing about how it behaves changed: a cell sets its own value, the +/-
+ * buttons and the keyboard step it, and it is still one item on the table.
  */
 export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
-  useSvgImages() // re-render once the SVGs have decoded
   const { w, h } = powerSize(item)
-  const sx = w / POWER_ARTBOARD.w
-  const sy = h / POWER_ARTBOARD.h
-  const img = svgImage(POWER_SVGS[POWER_VALUES.indexOf(item.value)] ?? POWER_SVGS[4])
+  const u = w / POWER_ART.w // artboard unit -> table mm
+  const x0 = -w / 2
+  const y0 = -h / 2
+  const cell = POWER_ART.cell * u
+  const gap = POWER_ART.gap * u
+  const pad = POWER_ART.pad * u
+  const inner = w - 2 * pad
+  const cellY = (fromTop: number) => y0 + pad + fromTop * (cell + gap)
+  const lit = powerCellFromTop(item.value)
   const reach = powerButtonReach(w)
-  const btnR = reach * 0.4
+  const btnR = reach * 0.42
   const stop = (e: KonvaEventObject<Event>) => {
     e.cancelBubble = true
   }
   const btn = (sign: -1 | 1) => (
     <Group
-      x={sign * (w / 2 + reach * 0.6)}
-      y={0}
+      x={0}
+      y={-sign * (h / 2 + reach * 0.55)}
       onClick={(e) => {
         stop(e)
         onStep(sign)
@@ -404,13 +462,23 @@ export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
         onStep(sign)
       }}
     >
-      <Circle radius={btnR} fill={BRAND.navy} stroke="rgba(255,255,255,0.7)" strokeWidth={btnR * 0.07} />
+      <Circle
+        radius={btnR}
+        fillLinearGradientStartPoint={{ x: 0, y: -btnR }}
+        fillLinearGradientEndPoint={{ x: 0, y: btnR }}
+        fillLinearGradientColorStops={[0, PLATE_TOP, 1, PLATE_BOTTOM]}
+        stroke={CREAM}
+        strokeWidth={btnR * 0.07}
+        shadowColor="rgba(0,0,0,0.45)"
+        shadowBlur={btnR * 0.5}
+        shadowOffsetY={btnR * 0.12}
+      />
       <Text
         text={sign > 0 ? '+' : '−'}
-        fontSize={btnR * 1.3}
-        fontFamily={CANVAS_FONT}
-        fontStyle="bold"
-        fill="#FFFFFF"
+        fontSize={btnR * 1.25}
+        fontFamily={BRAND_FONT}
+        fontStyle="700"
+        fill={CREAM}
         width={btnR * 2}
         height={btnR * 2}
         offsetX={btnR}
@@ -423,27 +491,89 @@ export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
   )
   return (
     <Group x={item.x} y={item.y}>
-      {img && <KImage image={img} x={-w / 2} y={-h / 2} width={w} height={h} />}
-      {/* the plate is one flat picture, so the segments get their own
-          invisible targets, one pitch wide so a finger has something to hit */}
-      {POWER_VALUES.map((v, i) => (
-        <Rect
-          key={v}
-          x={-w / 2 + (SEG_X0 + i * SEG_PITCH - (SEG_PITCH - SEG_W) / 2) * sx}
-          y={-h / 2 + SEG_BAND_TOP * sy}
-          width={SEG_PITCH * sx}
-          height={(SEG_BAND_BOTTOM - SEG_BAND_TOP) * sy}
-          fill="rgba(0,0,0,0)"
-          onClick={(e) => {
-            stop(e)
-            onValue(v)
-          }}
-          onTap={(e) => {
-            stop(e)
-            onValue(v)
-          }}
-        />
-      ))}
+      {/* the case the cells are set into, with the table's own soft shadow */}
+      <Rect
+        x={x0}
+        y={y0}
+        width={w}
+        height={h}
+        cornerRadius={9 * u}
+        fillLinearGradientStartPoint={{ x: 0, y: y0 }}
+        fillLinearGradientEndPoint={{ x: 0, y: y0 + h }}
+        fillLinearGradientColorStops={[0, PLATE_TOP, 0.5, BRAND.navy, 1, PLATE_BOTTOM]}
+        stroke="rgba(0,0,0,0.6)"
+        strokeWidth={1.6 * u}
+        shadowColor="rgba(0,0,0,0.45)"
+        shadowBlur={7 * u}
+        shadowOffsetX={1.4 * u}
+        shadowOffsetY={2.4 * u}
+      />
+      {POWER_VALUES.map((v) => {
+        const fromTop = powerCellFromTop(v)
+        const spent = fromTop >= lit
+        const y = cellY(fromTop)
+        return (
+          <Group key={v}>
+            <Rect
+              x={x0 + pad}
+              y={y}
+              width={inner}
+              height={cell}
+              cornerRadius={4 * u}
+              fill={powerCellColour(fromTop, spent)}
+              stroke="rgba(0,0,0,0.45)"
+              strokeWidth={0.9 * u}
+              listening={false}
+            />
+            {/* a thin lip along the top of a lit cell, so it reads as raised */}
+            {spent && (
+              <KLine
+                points={[x0 + pad + 4 * u, y + 2.2 * u, x0 + pad + inner - 4 * u, y + 2.2 * u]}
+                stroke="rgba(255,255,255,0.3)"
+                strokeWidth={1 * u}
+                lineCap="round"
+                listening={false}
+              />
+            )}
+            {/* the value lives in its own cell: the top of what the shot reaches */}
+            {fromTop === lit && (
+              <Text
+                x={x0 + pad}
+                y={y}
+                width={inner}
+                height={cell}
+                align="center"
+                verticalAlign="middle"
+                wrap="none"
+                text={formatPower(v)}
+                fontSize={cell * 0.62}
+                fontFamily={BRAND_FONT}
+                fontStyle="700"
+                fill="#FFFFFF"
+                shadowColor="rgba(0,0,0,0.45)"
+                shadowBlur={cell * 0.12}
+                listening={false}
+              />
+            )}
+            {/* the cell's own target, the whole row including its gap */}
+            <Rect
+              x={x0}
+              y={y - gap / 2}
+              width={w}
+              height={cell + gap}
+              fill="rgba(0,0,0,0)"
+              onClick={(e) => {
+                stop(e)
+                onValue(v)
+              }}
+              onTap={(e) => {
+                stop(e)
+                onValue(v)
+              }}
+            />
+          </Group>
+        )
+      })}
       {selected && btn(-1)}
       {selected && btn(1)}
     </Group>

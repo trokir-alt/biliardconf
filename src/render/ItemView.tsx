@@ -48,7 +48,7 @@ function inner(item: Item, ballMm: number, selected: boolean, scale: number) {
           onDotStart={() => st().beginHistory()}
           onDot={(dot) => st().updateItemLive(item.id, { dot })}
           onCompanionStart={() => st().beginHistory()}
-          onCompanion={(angleDeg) => st().updateItemLive(item.id, { companion: { angleDeg } })}
+          onCompanion={(side, fullness) => st().updateItemLive(item.id, { companion: { side, fullness } })}
         />
       )
     case 'power':

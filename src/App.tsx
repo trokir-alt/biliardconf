@@ -22,7 +22,7 @@ import { flushScene, saveScene } from './lib/storage'
 import { useStore } from './state/store'
 import { useView } from './state/view'
 import { useIsMobile } from './ui/useMedia'
-import { POWER_SVGS, STAMP_SVG } from './brand/assets'
+import { STAMP_SVG } from './brand/assets'
 import { preloadSvgImages } from './brand/svgImage'
 import { MobileShell } from './ui/mobile/MobileShell'
 import './ui/styles.css'
@@ -67,7 +67,7 @@ export function App() {
 
   /* start decoding the brand SVGs now, so the first export never waits */
   useEffect(() => {
-    preloadSvgImages([STAMP_SVG, ...POWER_SVGS])
+    preloadSvgImages([STAMP_SVG])
   }, [])
 
   /** drop the selection and the zoom, and give React two frames to redraw */

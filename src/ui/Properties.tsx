@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import { useStore } from '../state/store'
 import { mmToCss, useView } from '../state/view'
-import { itemBounds } from '../model/item'
+import { FULLNESS_STEPS, itemBounds } from '../model/item'
 import { INK, STROKE_WIDTHS, TEXT_SIZES } from '../model/style'
 import { formatPower } from '../model/item'
 import { useIsMobile } from './useMedia'
@@ -217,25 +217,33 @@ export function Properties() {
       {hasStrike && (
         <div className="props__row" aria-label="Второй шар">
           {!item.companion ? (
-            <button type="button" className="btn" onClick={() => st.setCompanion(item.id, 0)}>
-              Второй шар
+            <button type="button" className="btn" onClick={() => st.setCompanion(item.id, 'right')}>
+              Прицельный шар
             </button>
           ) : (
             <>
-              <span className="props__label">
-                Второй шар · {Math.round(item.companion.angleDeg)}° · Ø {item.sizeMm} мм
+              <span className="props__label">Какой частью</span>
+              <span className="seg" role="group" aria-label="Полнота удара">
+                {FULLNESS_STEPS.map((f) => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    className="btn seg__btn"
+                    aria-pressed={Math.abs(item.companion!.fullness - f.value) < 0.02}
+                    onClick={() => st.setFullness(item.id, f.value)}
+                  >
+                    {f.label}
+                  </button>
+                ))}
               </span>
-              <span className="seg" role="group" aria-label="Повернуть второй шар">
-                <button type="button" className="btn seg__btn" aria-label="Против часовой на 15 градусов" onClick={() => st.rotateCompanion(item.id, -15)}>
-                  ↺
+              <span className="seg" role="group" aria-label="Сторона прицельного шара">
+                <button type="button" className="btn seg__btn" aria-pressed={item.companion!.side === 'left'} onClick={() => st.setCompanion(item.id, 'left')}>
+                  Слева
                 </button>
-                <button type="button" className="btn seg__btn" aria-label="По часовой на 15 градусов" onClick={() => st.rotateCompanion(item.id, 15)}>
-                  ↻
+                <button type="button" className="btn seg__btn" aria-pressed={item.companion!.side === 'right'} onClick={() => st.setCompanion(item.id, 'right')}>
+                  Справа
                 </button>
               </span>
-              <button type="button" className="btn" onClick={() => st.rotateCompanion(item.id, 180)} title="На другую сторону">
-                Перевернуть
-              </button>
               <button type="button" className="btn btn--danger" onClick={() => st.setCompanion(item.id, null)}>
                 Убрать
               </button>
