@@ -5,7 +5,7 @@
  * to ItemView - nothing else in the app needs to know the new type exists.
  */
 
-import type { Item, Vec } from './types'
+import type { Item, StrikePointItem, Vec } from './types'
 import { quadControl } from './style'
 import { POWER_ARTBOARD } from '../brand/assets'
 
@@ -43,8 +43,12 @@ export function itemBounds(item: Item, ballMm: number): Rect {
   switch (item.type) {
     case 'ball':
       return box([item.x], [item.y], ballMm / 2)
-    case 'strikePoint':
-      return box([item.x], [item.y], item.sizeMm / 2)
+    case 'strikePoint': {
+      // with a second ball the pair is one picture, and the panel must clear it
+      if (!item.companion) return box([item.x], [item.y], item.sizeMm / 2)
+      const c = companionCentre(item)
+      return box([item.x, c.x], [item.y, c.y], item.sizeMm / 2)
+    }
     case 'power': {
       // the plate plus its +/- buttons: on the upright table those sit below
       // the plate, right where a floating panel would otherwise land
@@ -100,6 +104,51 @@ export const STRIKE_MIN_MM = 200
 export const STRIKE_MAX_MM = 500
 /** where the strike ball's size handle sits, as a multiple of its radius */
 export const STRIKE_HANDLE_K = 1.3
+
+/* ------------------------------------------- the second ball at the contact */
+
+/** the second ball's angle lands on this grid, in degrees */
+export const COMPANION_STEP_DEG = 15
+/** ...whenever the swing comes this close to a grid line */
+export const COMPANION_SNAP_DEG = 5
+
+/** degrees folded into [0, 360) */
+export function normDeg(deg: number): number {
+  const d = deg % 360
+  return d < 0 ? d + 360 : d
+}
+
+/**
+ * The centre of the second ball.
+ *
+ * Exactly one diameter from the host's centre, because both balls are drawn at
+ * the same magnification and touching is the whole statement. There is no
+ * second size to keep in sync and no way to end up with a gap.
+ */
+export function companionCentre(item: StrikePointItem): Vec {
+  const a = (item.companion ? item.companion.angleDeg : 0) * (Math.PI / 180)
+  return { x: item.x + item.sizeMm * Math.cos(a), y: item.y + item.sizeMm * Math.sin(a) }
+}
+
+/** Where the two balls meet: the midpoint of the line of centres. */
+export function companionContact(item: StrikePointItem): Vec {
+  const a = (item.companion ? item.companion.angleDeg : 0) * (Math.PI / 180)
+  const r = item.sizeMm / 2
+  return { x: item.x + r * Math.cos(a), y: item.y + r * Math.sin(a) }
+}
+
+/**
+ * The angle a swing lands on. Whole degrees, and with the markings magnet on
+ * it settles onto a 15-degree grid - the angles a coach names out loud.
+ */
+export function settleCompanionAngle(deg: number, magnet: boolean): number {
+  const d = normDeg(deg)
+  if (!magnet) return Math.round(d) % 360
+  // the nearest grid line is at most half a step away, so a plain difference
+  // is already the circular one - even when rounding lands on 360
+  const grid = Math.round(d / COMPANION_STEP_DEG) * COMPANION_STEP_DEG
+  return Math.abs(d - grid) <= COMPANION_SNAP_DEG ? normDeg(grid) : Math.round(d) % 360
+}
 
 export function itemHandles(item: Item): Handle[] {
   switch (item.type) {

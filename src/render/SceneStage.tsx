@@ -565,9 +565,21 @@ export function SceneStage({ stageRef }: SceneStageProps) {
       while (node && !node.id()) node = node.getParent()
       const id = node?.id()
       const item = useStore.getState().scene.items.find((i) => i.id === id)
-      if (item?.type === 'text') setEditing(item.id)
+      if (item?.type === 'text') {
+        setEditing(item.id)
+        return
+      }
+      // two taps on the strike widget put the object ball on the side tapped:
+      // on a phone, where the properties strip is cramped, this is the real way
+      if (item?.type === 'strikePoint' && !item.companion) {
+        const p = pointerMm()
+        if (p) {
+          const deg = (Math.atan2(p.y - item.y, p.x - item.x) * 180) / Math.PI
+          useStore.getState().setCompanion(item.id, deg)
+        }
+      }
     },
-    [setEditing],
+    [setEditing, pointerMm],
   )
 
   /* --------------------------------------------------------- handle drags */
@@ -825,7 +837,14 @@ export function StageHint() {
   if (tool === 'ball-white' || tool === 'ball-cue')
     return <p className="stage-wrap__hint">Нажмите на стол, чтобы поставить шар.</p>
   if (tool === 'text') return <p className="stage-wrap__hint">Нажмите на стол, чтобы поставить подпись.</p>
-  if (tool === 'strike' || tool === 'power' || tool === 'ghost-ball')
+  if (tool === 'strike')
+    return (
+      <p className="stage-wrap__hint">
+        <span>Нажмите на стол, чтобы поставить шар с точкой удара.</span>{' '}
+        <span className="stage-wrap__keys">Двойной клик по нему - второй шар в точке касания, его можно крутить.</span>
+      </p>
+    )
+  if (tool === 'power' || tool === 'ghost-ball')
     return <p className="stage-wrap__hint">Нажмите на стол, чтобы поставить виджет. Потом его можно тянуть.</p>
   return (
     <p className="stage-wrap__hint">

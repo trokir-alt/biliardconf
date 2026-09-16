@@ -24,7 +24,7 @@ import type {
 } from '../model/types'
 import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE, buildGeometry, clampToField } from '../model/table'
-import { STRIKE_MAX_MM, STRIKE_MIN_MM, translateItem } from '../model/item'
+import { STRIKE_MAX_MM, STRIKE_MIN_MM, itemBounds, normDeg, settleCompanionAngle, translateItem } from '../model/item'
 import {
   DEFAULT_HEAD,
   DEFAULT_INK,
@@ -116,6 +116,9 @@ export type AppState = {
   setPower: (id: string, value: PowerValue) => void
   adjustPower: (id: string, steps: number) => void
   resetDot: (id: string) => void
+  /** add, swing or remove the second ball at the contact; null removes it */
+  setCompanion: (id: string, angleDeg: number | null) => void
+  rotateCompanion: (id: string, deltaDeg: number) => void
   setStrikeSize: (id: string, mm: number) => void
   /** one history entry; for property changes and finished edits */
   updateItem: (id: string, patch: Partial<Item>) => void
@@ -332,6 +335,22 @@ export const useStore = create<AppState>()(
 
       resetDot: (id) => get().updateItem(id, { dot: { u: 0, v: 0 } } as Partial<Item>),
 
+      setCompanion: (id, angleDeg) => {
+        const item = get().scene.items.find((i) => i.id === id)
+        if (!item || item.type !== 'strikePoint') return
+        get().updateItem(id, {
+          companion: angleDeg === null ? undefined : { angleDeg: settleCompanionAngle(angleDeg, false) },
+        } as Partial<Item>)
+      },
+
+      rotateCompanion: (id, deltaDeg) => {
+        const item = get().scene.items.find((i) => i.id === id)
+        if (!item || item.type !== 'strikePoint' || !item.companion) return
+        get().updateItem(id, {
+          companion: { angleDeg: normDeg(item.companion.angleDeg + deltaDeg) },
+        } as Partial<Item>)
+      },
+
       setStrikeSize: (id, mm) =>
         get().updateItem(id, {
           sizeMm: Math.round(Math.min(STRIKE_MAX_MM, Math.max(STRIKE_MIN_MM, mm))),
@@ -391,7 +410,11 @@ export const useStore = create<AppState>()(
         const { selectedId, scene } = get()
         const item = scene.items.find((i) => i.id === selectedId)
         if (!item) return
-        const copy = { ...translateItem(item, 90, 90), id: newId(item.type) } as Item
+        // 90 mm clears a ball but not a 600 mm pair of magnified ones: a copy
+        // landing on top of its original reads as a rendering fault
+        const b = itemBounds(item, scene.table.ballMm)
+        const off = Math.max(90, Math.round(Math.max(b.w, b.h) * 0.25))
+        const copy = { ...translateItem(item, off, off), id: newId(item.type) } as Item
         edit((s) => {
           s.scene.items.push(copy)
           s.selectedId = copy.id

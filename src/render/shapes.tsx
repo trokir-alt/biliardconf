@@ -22,7 +22,7 @@ import type {
   ZoneItem,
 } from '../model/types'
 import { POWER_VALUES } from '../model/types'
-import { arrowCurve, powerButtonReach, powerSize, settleDot } from '../model/item'
+import { arrowCurve, powerButtonReach, powerSize, settleCompanionAngle, settleDot } from '../model/item'
 import { BRAND, POWER_ARTBOARD, POWER_SVGS } from '../brand/assets'
 import { svgImage, useSvgImages } from '../brand/svgImage'
 import { CANVAS_FONT } from '../model/fonts'
@@ -214,6 +214,11 @@ export type StrikePointProps = {
   /** live while dragging, final on release */
   onDot: (dot: { u: number; v: number }, final: boolean) => void
   onDotStart: () => void
+  /** the swing of the second ball, in degrees; final on release */
+  onCompanion: (angleDeg: number, final: boolean) => void
+  onCompanionStart: () => void
+  /** whether the angle settles onto the 15-degree grid */
+  magnet: boolean
 }
 
 /**
@@ -221,8 +226,12 @@ export type StrikePointProps = {
  * draggable node: dragging it moves only the dot, and its drag events are
  * stopped here so the widget underneath does not also start moving.
  */
-export function StrikePointShape({ item, scale, onDot, onDotStart }: StrikePointProps) {
+export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, onCompanionStart, magnet }: StrikePointProps) {
   const r = item.sizeMm / 2
+  const angle = (item.companion ? item.companion.angleDeg : 0) * (Math.PI / 180)
+  // the second ball's centre in the host's own frame: one diameter out, so the
+  // two rims meet exactly, whatever the size
+  const cc = { x: 2 * r * Math.cos(angle), y: 2 * r * Math.sin(angle) }
   const dotR = item.sizeMm / 16
   // a grab area of at least 44 screen px, however small the dot is drawn
   const grabR = Math.max(dotR, 22 / Math.max(scale, 1e-6))
@@ -236,11 +245,41 @@ export function StrikePointShape({ item, scale, onDot, onDotStart }: StrikePoint
     node.position({ x: dot.u * r, y: dot.v * r })
     onDot(dot, final)
   }
+  const swing = (e: KonvaEventObject<DragEvent>, final: boolean) => {
+    e.cancelBubble = true
+    const node = e.target
+    const deg = (Math.atan2(node.y(), node.x()) * 180) / Math.PI
+    const settled = settleCompanionAngle(deg, magnet)
+    const a = settled * (Math.PI / 180)
+    // straight back onto its circle, so the magnet is visible while swinging
+    // rather than only on release
+    node.position({ x: 2 * r * Math.cos(a), y: 2 * r * Math.sin(a) })
+    onCompanion(settled, final)
+  }
   const ring = (k: number) => (
     <Circle key={k} radius={r * k} stroke="rgba(0,0,0,0.55)" strokeWidth={1.6} listening={false} />
   )
   return (
     <Group x={item.x} y={item.y}>
+      {/* Both shadows go down before either body: a shadow drawn after the
+          white ball would smear grey across it. The second ball's shadow also
+          leans OUTWARD along the bearing, so the seam where the two rims meet -
+          the one line in this picture that carries the physics - stays clean
+          whichever side the ball is on. */}
+      {item.companion && (
+        <Ellipse
+          x={cc.x + r * 0.3 + r * 0.28 * Math.cos(angle)}
+          y={cc.y + r * 0.38 + r * 0.28 * Math.sin(angle)}
+          radiusX={r * 0.94}
+          radiusY={r * 0.68}
+          fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+          fillRadialGradientStartRadius={0}
+          fillRadialGradientEndPoint={{ x: 0, y: 0 }}
+          fillRadialGradientEndRadius={r * 0.94}
+          fillRadialGradientColorStops={[0, 'rgba(0,0,0,0.34)', 0.55, 'rgba(0,0,0,0.14)', 1, 'rgba(0,0,0,0)']}
+          listening={false}
+        />
+      )}
       {/* the same soft contact shadow a ball has */}
       <Ellipse
         x={r * 0.3}
@@ -254,6 +293,30 @@ export function StrikePointShape({ item, scale, onDot, onDotStart }: StrikePoint
         fillRadialGradientColorStops={[0, 'rgba(0,0,0,0.34)', 0.55, 'rgba(0,0,0,0.14)', 1, 'rgba(0,0,0,0)']}
         listening={false}
       />
+      {/* The object ball: flat white and bare, with no rings, no dot and no
+          modelling. Shaded like the host it would read as a second cue ball and
+          the point - this is the ball being HIT, not the one being struck -
+          would be lost. It is drawn before the host, so the host's own rim
+          draws the seam as one line. Dragging it swings it; it cannot come
+          off, and it cannot end up a hair short of contact. */}
+      {item.companion && (
+        <Group
+          name="companion"
+          x={cc.x}
+          y={cc.y}
+          draggable
+          onMouseDown={stop}
+          onTouchStart={stop}
+          onDragStart={(e) => {
+            e.cancelBubble = true
+            onCompanionStart()
+          }}
+          onDragMove={(e) => swing(e, false)}
+          onDragEnd={(e) => swing(e, true)}
+        >
+          <Circle radius={r} fill={BALL.white.base} stroke="rgba(0,0,0,0.6)" strokeWidth={2} />
+        </Group>
+      )}
       <Circle
         radius={r}
         fillRadialGradientStartPoint={{ x: -r * 0.2, y: -r * 0.22 }}

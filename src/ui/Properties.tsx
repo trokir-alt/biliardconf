@@ -46,7 +46,9 @@ export function Properties() {
   const st = useStore.getState()
   const t = item.type
 
-  const hasColor = t !== 'ball'
+  // a widget has no colour field: six ink swatches on it stamp a key the type
+  // does not have, and the coach clicks red and nothing turns red
+  const hasColor = t !== 'ball' && t !== 'strikePoint' && t !== 'power' && t !== 'ghostBall'
   const hasWidth = t === 'arrow' || t === 'line'
   const hasStyle = t === 'arrow' || t === 'line'
   const hasHead = t === 'arrow'
@@ -209,6 +211,36 @@ export function Properties() {
           <button type="button" className="btn" onClick={() => st.resetDot(item.id)} disabled={item.dot.u === 0 && item.dot.v === 0}>
             Точку в центр
           </button>
+        </div>
+      )}
+
+      {hasStrike && (
+        <div className="props__row" aria-label="Второй шар">
+          {!item.companion ? (
+            <button type="button" className="btn" onClick={() => st.setCompanion(item.id, 0)}>
+              Второй шар
+            </button>
+          ) : (
+            <>
+              <span className="props__label">
+                Второй шар · {Math.round(item.companion.angleDeg)}° · Ø {item.sizeMm} мм
+              </span>
+              <span className="seg" role="group" aria-label="Повернуть второй шар">
+                <button type="button" className="btn seg__btn" aria-label="Против часовой на 15 градусов" onClick={() => st.rotateCompanion(item.id, -15)}>
+                  ↺
+                </button>
+                <button type="button" className="btn seg__btn" aria-label="По часовой на 15 градусов" onClick={() => st.rotateCompanion(item.id, 15)}>
+                  ↻
+                </button>
+              </span>
+              <button type="button" className="btn" onClick={() => st.rotateCompanion(item.id, 180)} title="На другую сторону">
+                Перевернуть
+              </button>
+              <button type="button" className="btn btn--danger" onClick={() => st.setCompanion(item.id, null)}>
+                Убрать
+              </button>
+            </>
+          )}
         </div>
       )}
 

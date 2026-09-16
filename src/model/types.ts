@@ -118,6 +118,17 @@ export type StrikePointItem = ItemBase & {
   /** diameter in table mm, 200..500 */
   sizeMm: number
   dot: { u: number; v: number }
+  /**
+   * The object ball at the moment of contact, drawn white at the same
+   * magnification as this one.
+   *
+   * It is stored as a DIRECTION and never as a position. A silhouette three
+   * millimetres short of contact draws a collision that cannot happen, and at
+   * the scale a phone draws this widget that gap is a third of a pixel:
+   * invisible to the coach, wrong to the pupil. Degrees clockwise from the
+   * table's +x axis; absent means the shot is shown against nothing.
+   */
+  companion?: { angleDeg: number }
 }
 
 /** the nine values the strength scale can take; nothing in between */

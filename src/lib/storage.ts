@@ -17,6 +17,7 @@ import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE } from '../model/table'
 import { POWER_DEFAULT_MM, POWER_MAX_MM, POWER_MIN_MM } from '../model/item'
 import { DEFAULT_DENSITY, isDensity, type Density } from '../brand/watermark'
+import { normDeg } from '../model/item'
 
 const KEY = 'biliardconf.scene.v1'
 /** the watermark density is a setting, not scene data: it belongs to the
@@ -125,6 +126,12 @@ function parseItem(raw: unknown): Item | null {
       }
     }
     case 'strikePoint': {
+      const comp = o.companion
+      const angle =
+        comp && typeof comp === 'object' && typeof (comp as Record<string, unknown>).angleDeg === 'number' &&
+        Number.isFinite((comp as Record<string, unknown>).angleDeg as number)
+          ? { angleDeg: normDeg((comp as { angleDeg: number }).angleDeg) }
+          : undefined
       const p = vec(o)
       const dot = vec(o.dot) ?? { x: 0, y: 0 }
       if (!p) return null
@@ -137,6 +144,9 @@ function parseItem(raw: unknown): Item | null {
         y: p.y,
         sizeMm: Math.min(500, Math.max(200, num(o.sizeMm, 300))),
         dot: { u: dot.x * k, v: dot.y * k },
+        // a second ball that fails to validate is dropped, never guessed at:
+        // half a collision is a picture the coach did not draw
+        companion: angle,
       }
     }
     case 'power': {

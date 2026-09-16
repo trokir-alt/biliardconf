@@ -458,6 +458,122 @@ async function stage3(page, label) {
   check(`${label}: the corner handle resizes the indicator`, after > before + 100 && after <= 600, `${before} -> ${after} mm`)
   await page.evaluate((id) => window.__store.getState().updateItem(id, { widthMm: 444 }), pw.id)
 
+  // ---- the second ball at the contact: born touching, stays touching ----
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.addItem({ id: 'cb-host', type: 'strikePoint', x: 1200, y: 1300, sizeMm: 300, dot: { u: 0, v: 0 } }, 'belowText')
+    st.select(null)
+  })
+  await page.waitForTimeout(150)
+  const host = () => scene(page).then((sc) => sc.items.find((i) => i.id === 'cb-host'))
+  let hb = await host()
+  check(`${label}: a strike widget starts with no second ball`, hb.companion === undefined)
+
+  // two taps on the left of the widget put it on the left
+  const [cdx, cdy] = await toPage(page, hb.x - hb.sizeMm * 0.35, hb.y)
+  await page.mouse.dblclick(cdx, cdy)
+  await page.waitForTimeout(300)
+  hb = await host()
+  check(`${label}: a double click adds the second ball on the side clicked`,
+    !!hb.companion && Math.abs(((hb.companion.angleDeg - 180 + 540) % 360) - 180) <= 20,
+    hb.companion ? `${hb.companion.angleDeg}°` : 'none')
+
+  /** the second ball's centre, from the angle alone */
+  const compCentre = (it) => ({
+    x: it.x + it.sizeMm * Math.cos((it.companion.angleDeg * Math.PI) / 180),
+    y: it.y + it.sizeMm * Math.sin((it.companion.angleDeg * Math.PI) / 180),
+  })
+  const gap = (it) => Math.hypot(compCentre(it).x - it.x, compCentre(it).y - it.y) - it.sizeMm
+  check(`${label}: the two balls touch exactly`, Math.abs(gap(hb)) < 1e-6, `${gap(hb).toExponential(1)} mm`)
+
+  // swing it by dragging the white ball; only the angle may change
+  const wasAt = { x: hb.x, y: hb.y, size: hb.sizeMm }
+  await gesture(page, compCentre(hb), { x: hb.x + 10, y: hb.y - hb.sizeMm })
+  hb = await host()
+  check(`${label}: dragging the second ball swings it`, Math.abs(((hb.companion.angleDeg - 270 + 540) % 360) - 180) <= 8, `${hb.companion.angleDeg}°`)
+  check(`${label}: swinging it does not move or resize the widget`,
+    Math.abs(hb.x - wasAt.x) < 0.01 && Math.abs(hb.y - wasAt.y) < 0.01 && hb.sizeMm === wasAt.size,
+    `${hb.x.toFixed(1)},${hb.y.toFixed(1)} Ø${hb.sizeMm}`)
+  check(`${label}: the swing lands on the 15 degree grid`, hb.companion.angleDeg % 15 === 0, `${hb.companion.angleDeg}°`)
+  check(`${label}: ...and it is still touching`, Math.abs(gap(hb)) < 1e-6)
+
+  // the pair is rigid: move and resize the host, contact holds
+  await page.evaluate(() => window.__store.getState().nudgeSelected(0, 0))
+  await page.evaluate((id) => {
+    const st = window.__store.getState()
+    st.select(id)
+    st.nudgeSelected(25, -15)
+    st.setStrikeSize(id, 500)
+  }, 'cb-host')
+  await page.waitForTimeout(150)
+  hb = await host()
+  check(`${label}: the pair stays rigid when the widget moves and grows`,
+    Math.abs(gap(hb)) < 1e-6 && hb.sizeMm === 500, `Ø${hb.sizeMm}, gap ${gap(hb).toExponential(1)}`)
+
+  // the picture: white ball against a warm host, and no cloth between them
+  const seam = await page.evaluate(
+    (SAMPLER) => {
+      const at = eval(SAMPLER)
+      const it = window.__store.getState().scene.items.find((i) => i.id === 'cb-host')
+      const a = (it.companion.angleDeg * Math.PI) / 180
+      const c = { x: it.x + it.sizeMm * Math.cos(a), y: it.y + it.sizeMm * Math.sin(a) }
+      const cloth = at(it.x - it.sizeMm * 2.2, it.y)
+      const white = at(c.x, c.y)
+      const warm = at(it.x, it.y)
+      // walk the line of centres: no sample may read as bare cloth, or the
+      // two balls are not touching
+      let clothy = 0
+      let n = 0
+      for (let t = 0.12; t <= 0.88; t += 0.01) {
+        const p = at(it.x + (c.x - it.x) * t, it.y + (c.y - it.y) * t)
+        if (!p || !cloth) continue
+        n++
+        const d = Math.max(Math.abs(p[0] - cloth[0]), Math.abs(p[1] - cloth[1]), Math.abs(p[2] - cloth[2]))
+        if (d < 30) clothy++
+      }
+      return { white, warm, clothy, n }
+    },
+    S4_SAMPLER,
+  )
+  check(`${label}: the second ball is flat white, not a second cue ball`,
+    seam.white && seam.white[0] > 235 && seam.white[1] > 235 && seam.white[2] > 235 && Math.abs(seam.white[0] - seam.white[2]) <= 10,
+    `white ${seam.white} vs host ${seam.warm}`)
+  check(`${label}: the host still reads warm against it`, seam.warm && seam.warm[0] - seam.warm[2] > 40, `r-b ${seam.warm ? seam.warm[0] - seam.warm[2] : '?'}`)
+  check(`${label}: no cloth shows between the two balls`, seam.clothy === 0, `${seam.clothy} of ${seam.n} samples`)
+
+  // the buttons, and removal that outlives a reload
+  await page.evaluate((id) => window.__store.getState().select(id), 'cb-host')
+  await page.waitForTimeout(120)
+  const angBefore = (await host()).companion.angleDeg
+  await page.getByRole('button', { name: 'Перевернуть' }).click()
+  await page.waitForTimeout(150)
+  check(`${label}: "flip" puts the second ball on the other side`,
+    (await host()).companion.angleDeg === (angBefore + 180) % 360, `${angBefore}° -> ${(await host()).companion.angleDeg}°`)
+  await page.getByRole('button', { name: 'По часовой на 15 градусов' }).click()
+  await page.waitForTimeout(150)
+  check(`${label}: the step button turns it by 15 degrees`, (await host()).companion.angleDeg === (angBefore + 195) % 360)
+  await page.keyboard.press('Control+z')
+  await page.waitForTimeout(150)
+  check(`${label}: undo takes the turn back`, (await host()).companion.angleDeg === (angBefore + 180) % 360)
+  await page.waitForTimeout(700)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForTimeout(700)
+  check(`${label}: the second ball survives a reload`, (await host())?.companion?.angleDeg === (angBefore + 180) % 360)
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.select('cb-host')
+  })
+  await page.waitForTimeout(120)
+  await page.getByRole('button', { name: 'Убрать' }).click()
+  await page.waitForTimeout(150)
+  check(`${label}: "remove" takes the second ball away`, (await host()).companion === undefined)
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.select('cb-host')
+    st.removeSelected()
+  })
+  await page.waitForTimeout(120)
+
   // ---- wireframe ball: placed by a tap, snaps to contact with a real ball ----
   await page.evaluate(() => window.__store.getState().addBall('white', { x: 2000, y: 600 }))
   await tool(page, 'Шар-призрак')

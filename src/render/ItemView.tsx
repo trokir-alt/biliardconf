@@ -44,8 +44,11 @@ function inner(item: Item, ballMm: number, selected: boolean, scale: number) {
         <StrikePointShape
           item={item}
           scale={scale}
+          magnet={st().snap}
           onDotStart={() => st().beginHistory()}
           onDot={(dot) => st().updateItemLive(item.id, { dot })}
+          onCompanionStart={() => st().beginHistory()}
+          onCompanion={(angleDeg) => st().updateItemLive(item.id, { companion: { angleDeg } })}
         />
       )
     case 'power':
