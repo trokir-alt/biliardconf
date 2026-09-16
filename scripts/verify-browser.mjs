@@ -487,132 +487,278 @@ async function stage3(page, label) {
 
 /* ------------------------------------- 2. the picture itself, in millimetres */
 
-async function picture(page, label) {
-  // ---- the watermark: on an empty cloth, visible but faint ----
-  await page.evaluate(() => window.__store.getState().newExercise())
-  await page.waitForTimeout(300)
-  const wm = await page.evaluate(() => {
-    const node = window.__stage.find('.watermark')[0]
-    const layers = [...document.querySelectorAll('.konvajs-content canvas')]
-    const canvas = document.createElement('canvas')
-    canvas.width = layers[0].width
-    canvas.height = layers[0].height
-    const g = canvas.getContext('2d')
-    for (const l of layers) g.drawImage(l, 0, 0)
-    const L = window.__layout
-    const dpr = canvas.width / parseFloat(layers[0].style.width)
-    const img = g.getImageData(0, 0, canvas.width, canvas.height).data
-    // takes a point in table mm; a sample off the canvas is NaN and counts for nothing
-    const luma = ({ x: mx, y: my }) => {
-      const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
-      const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
-      const i = (Math.round(sy * dpr) * canvas.width + Math.round(sx * dpr)) * 4
-      return 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2]
-    }
-    const sc = window.__store.getState().scene
-    const LEN = sc.table.lengthMm, WID = sc.table.widthMm
-    const cx = LEN / 2, cy = WID / 2
-    // the text follows a diagonal: (0,W)->(L,0) flat, (L,W)->(0,0) upright
-    const tilt = Math.atan2(WID, LEN)
-    const dir = L.rotation === 90 ? { x: -Math.cos(tilt), y: -Math.sin(tilt) } : { x: Math.cos(tilt), y: -Math.sin(tilt) }
-    // 40 mm to one side of the baseline, through the lower-case bodies
-    const along = (t) => ({ x: cx + dir.x * t + dir.y * 40, y: cy + dir.y * t - dir.x * 40 })
-    const base = luma({ x: cx + dir.y * 500, y: cy - dir.x * 500 }) // cloth well off the text
-    const onMarking = (p) =>
-      [LEN / 4, LEN / 2, (3 * LEN) / 4].some((x) => Math.abs(p.x - x) < 12) || Math.abs(p.y - WID / 2) < 12
-    let glyph = 0, loud = 0, n = 0
-    for (let t = -1500; t <= 1500; t += 4) {
-      const p = along(t)
-      if (onMarking(p)) continue
-      const d = Math.abs(luma(p) - base)
-      n++
-      if (d >= 4 && d <= 60) glyph++
-      if (d > 60) loud++
-    }
-    // the rail plate: dark letters on the wood, sampled along its own baseline
-    const rail = window.__stage.find('.watermark-rail')[0]
-    let railGlyph = 0, railN = 0
-    if (rail) {
-      const rx = rail.x() + rail.width() / 2, ry = rail.y() + rail.height() / 2
-      const rbase = luma({ x: rx, y: ry + 45 }) // wood just below the plate
-      for (let t = -150; t <= 150; t += 3) {
-        railN++
-        if (rbase - luma({ x: rx + t, y: ry + 6 }) >= 8) railGlyph++
+/* ------------------------------------ stage 4: the brand, mark and indicator */
+
+/**
+ * The test scene the brief asks for: cue ball, a four-ghost trail, an arrow, a
+ * zone and the strength indicator, all laid across the watermark grid.
+ */
+const S4_SCENE = () => {
+  const st = window.__store.getState()
+  st.newExercise()
+  const L = st.scene.table.lengthMm
+  const s = L / 1120
+  // the first stamp of the grid, in table mm, from the package's own formula
+  const stamp = { x: (64 - 40) * s, y: (132 - 40) * s, w: 206 * s, h: 42 * s }
+  const mid = { x: stamp.x + stamp.w / 2, y: stamp.y + stamp.h / 2 }
+  // a red arrow straight through the second stamp: white ink over red would
+  // show, so this is what proves the mark is underneath
+  st.addItem({
+    id: 's4-arrow', type: 'arrow',
+    points: [{ x: (336 - 40) * s, y: (132 - 40) * s + stamp.h / 2 }, { x: (336 - 40) * s + stamp.w, y: (132 - 40) * s + stamp.h / 2 }],
+    style: 'solid', color: '#FF5A4E', width: 26, head: 'filled', curved: false,
+  })
+  // the cue ball sits on the first stamp; the twin sits on bare cloth
+  st.addItem({ id: 's4-ball', type: 'ball', x: mid.x, y: mid.y, kind: 'cue' }, 'top')
+  st.addItem({ id: 's4-twin', type: 'ball', x: mid.x, y: mid.y + stamp.h * 2.1, kind: 'cue' }, 'top')
+  // four ghosts across the grid: the tail is the faintest thing on the table
+  st.addItem({
+    id: 's4-ghost', type: 'ghostTrail',
+    from: { x: (110 - 40) * s, y: (300 - 40) * s }, to: { x: (900 - 40) * s, y: (300 - 40) * s },
+    count: 4, autoCount: false, head: false, color: '#FFFFFF',
+  })
+  st.addItem({ id: 's4-zone', type: 'zone', x: (620 - 40) * s, y: (430 - 40) * s, w: 300 * s, h: 120 * s, shape: 'rect', color: '#F5A623', opacity: 0.25 }, 'bottom')
+  st.addItem({ id: 's4-power', type: 'power', x: L * 0.75, y: (500 - 40) * s, value: 4, widthMm: 600 }, 'belowText')
+  st.select(null)
+  return stamp
+}
+
+/** a sampler over the composite of every Konva layer, in table millimetres */
+const S4_SAMPLER = `(() => {
+  const layers = [...document.querySelectorAll('.konvajs-content canvas')]
+  const c = document.createElement('canvas')
+  c.width = layers[0].width
+  c.height = layers[0].height
+  const g = c.getContext('2d')
+  for (const l of layers) g.drawImage(l, 0, 0)
+  const L = window.__layout
+  const dpr = c.width / parseFloat(layers[0].style.width)
+  const d = g.getImageData(0, 0, c.width, c.height).data
+  return (mx, my) => {
+    const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
+    const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
+    const x = Math.round(sx * dpr), y = Math.round(sy * dpr)
+    if (x < 0 || y < 0 || x >= c.width || y >= c.height) return null
+    const i = (y * c.width + x) * 4
+    return [d[i], d[i + 1], d[i + 2]]
+  }
+})()`
+
+async function stage4(page, label) {
+  await page.evaluate(S4_SCENE)
+  await page.waitForTimeout(400)
+
+  // ---- the grid: every signature distinguishable on the cloth ----
+  const grid = await page.evaluate(
+    (SAMPLER) => {
+      const at = eval(SAMPLER)
+      const marks = window.__stage.find('.watermark')
+      // a stamp counts when its own box carries far more ink than bare cloth
+      const inkPct = (b) => {
+        let ink = 0, n = 0
+        for (let u = 0.02; u < 0.98; u += 0.01)
+          for (let v = 0.05; v < 0.95; v += 0.06) {
+            const c = at(b.x + u * b.w, b.y + v * b.h)
+            const bg = at(b.x + u * b.w, b.y + b.h * 1.75)
+            if (!c || !bg) continue
+            n++
+            if (c[0] - bg[0] >= 3) ink++
+          }
+        return n ? (ink / n) * 100 : 0
+      }
+      const boxes = marks.map((m) => ({ x: m.x(), y: m.y(), w: m.width(), h: m.height() }))
+      const pcts = boxes.map(inkPct)
+      return { count: marks.length, visible: pcts.filter((p) => p >= 4).length, min: Math.min(...pcts), rotations: marks.map((m) => m.getAbsoluteRotation ? 0 : 0).length }
+    },
+    S4_SAMPLER,
+  )
+  check(`${label}: at least 12 signatures are distinguishable on the cloth`, grid.visible >= 12, `${grid.visible} of ${grid.count}, faintest ${grid.min.toFixed(1)}% ink`)
+
+  // ---- the mark is under the content, not over it ----
+  const under = await page.evaluate(
+    (SAMPLER) => {
+      const at = eval(SAMPLER)
+      const sc = window.__store.getState().scene
+      const ball = sc.items.find((i) => i.id === 's4-ball')
+      const twin = sc.items.find((i) => i.id === 's4-twin')
+      const r = sc.table.ballMm / 2
+      // the same ball, once over a signature and once over bare cloth: if the
+      // mark were on top, white ink would lighten the first one
+      // means, not worst pixels: at twelve pixels across, half a pixel of
+      // rounding on the ball's gradient is already fifteen levels, while a
+      // white signature composited on top would raise blue by about forty
+      const sum = [0, 0, 0]
+      let n1 = 0
+      for (let a = 0; a < 360; a += 15)
+        for (const k of [0, 0.35, 0.6]) {
+          const dx = Math.cos((a * Math.PI) / 180) * r * k
+          const dy = Math.sin((a * Math.PI) / 180) * r * k
+          const p1 = at(ball.x + dx, ball.y + dy)
+          const p2 = at(twin.x + dx, twin.y + dy)
+          if (!p1 || !p2) continue
+          n1++
+          for (let c = 0; c < 3; c++) sum[c] += p1[c] - p2[c]
+        }
+      const mean = sum.map((v) => v / Math.max(1, n1))
+      const worst = Math.max(...mean.map(Math.abs))
+      const worstAt = mean.map((v) => v.toFixed(1)).join(' / ')
+      // the arrow: pure ink all the way across the signature it crosses
+      const ar = sc.items.find((i) => i.id === 's4-arrow')
+      let offColour = 0
+      let n = 0
+      for (let t = 0.1; t <= 0.9; t += 0.02) {
+        const x = ar.points[0].x + (ar.points[1].x - ar.points[0].x) * t
+        const c = at(x, ar.points[0].y)
+        if (!c) continue
+        n++
+        // #FF5A4E, allowing for antialiasing along the shaft
+        if (Math.abs(c[0] - 255) > 6 || Math.abs(c[1] - 90) > 8 || Math.abs(c[2] - 78) > 8) offColour++
+      }
+      return { worst, worstAt, offColour, n }
+    },
+    S4_SAMPLER,
+  )
+  check(`${label}: a ball over a signature is the same ball as one on bare cloth`, under.worst <= 6, `mean r/g/b shift ${under.worstAt}`)
+  check(`${label}: an arrow crossing a signature keeps its own colour`, under.offColour === 0, `${under.offColour} of ${under.n} samples tinted`)
+
+  // ---- the tail of a trajectory survives ----
+  const tail = await page.evaluate(
+    (SAMPLER) => {
+      const at = eval(SAMPLER)
+      const sc = window.__store.getState().scene
+      const gh = sc.items.find((i) => i.id === 's4-ghost')
+      const r = sc.table.ballMm / 2
+      // the ghosts run from `from` to `to`; the last one is the faintest
+      const n = gh.count
+      const out = []
+      for (let i = 0; i < n; i++) {
+        const t = n === 1 ? 0 : i / (n - 1)
+        const cx = gh.from.x + (gh.to.x - gh.from.x) * t
+        const cy = gh.from.y + (gh.to.y - gh.from.y) * t
+        // brightest point on the ghost's ring against the cloth beside it
+        let best = -999
+        for (let a = 0; a < 360; a += 10) {
+          const c = at(cx + Math.cos((a * Math.PI) / 180) * r * 0.92, cy + Math.sin((a * Math.PI) / 180) * r * 0.92)
+          const bg = at(cx + Math.cos((a * Math.PI) / 180) * r * 2.4, cy + Math.sin((a * Math.PI) / 180) * r * 2.4)
+          if (!c || !bg) continue
+          best = Math.max(best, c[0] - bg[0])
+        }
+        out.push(best)
+      }
+      return out
+    },
+    S4_SAMPLER,
+  )
+  const faintest = Math.min(...tail)
+  check(`${label}: the faintest ghost still clears the cloth by 20 levels of red`, faintest >= 20, `ghosts at ${tail.map((v) => v.toFixed(0)).join(' / ')}`)
+
+  // ---- the indicator: nine states, 2 x value filled segments ----
+  const states = await page.evaluate(
+    async (SAMPLER) => {
+      const values = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
+      const out = []
+      for (const v of values) {
+        window.__store.getState().setPower('s4-power', v)
+        await new Promise((r) => setTimeout(r, 90))
+        const at = eval(SAMPLER)
+        const it = window.__store.getState().scene.items.find((i) => i.id === 's4-power')
+        const W = it.widthMm
+        const H = (W * 88) / 140
+        const sx = W / 140
+        const sy = H / 88
+        let filled = 0
+        for (let i = 0; i < 9; i++) {
+          const c = at(it.x - W / 2 + (12 + 13 * i + 5) * sx, it.y - H / 2 + 65 * sy)
+          // a filled segment is white inside, an empty one shows the plate
+          if (c && c[0] > 200 && c[1] > 200 && c[2] > 200) filled++
+        }
+        out.push({ v, filled })
+      }
+      return out
+    },
+    S4_SAMPLER,
+  )
+  const wrong = states.filter((s) => s.filled !== 2 * s.v)
+  check(`${label}: every one of the nine states fills 2 x value segments`, wrong.length === 0, wrong.map((s) => `${s.v}->${s.filled}`).join(' ') || '9/9')
+
+  // ---- the decimal mark is a comma ----
+  const comma = await page.evaluate(
+    (SAMPLER) => {
+      window.__store.getState().setPower('s4-power', 4)
+      return new Promise((resolve) =>
+        setTimeout(() => {
+          const at = eval(SAMPLER)
+          const it = window.__store.getState().scene.items.find((i) => i.id === 's4-power')
+          const W = it.widthMm
+          const H = (W * 88) / 140
+          const sx = W / 140
+          const sy = H / 88
+          const ink = (x0, x1, y0, y1) => {
+            let n = 0
+            for (let x = x0; x <= x1; x += 0.5)
+              for (let y = y0; y <= y1; y += 0.5) {
+                const c = at(it.x - W / 2 + x * sx, it.y - H / 2 + y * sy)
+                if (c && c[0] > 200 && c[1] > 200 && c[2] > 200) n++
+              }
+            return n
+          }
+          // the digits sit on the baseline at y = 38; only a comma puts ink
+          // below it, and it does so between the two digits
+          resolve({ below: ink(62, 70, 39.5, 43), underDigits: ink(46, 60, 39.5, 43) })
+        }, 120),
+      )
+    },
+    S4_SAMPLER,
+  )
+  check(`${label}: the decimal mark is a comma, with a tail below the baseline`, comma.below > 0 && comma.underDigits === 0, `${comma.below} samples below the separator, ${comma.underDigits} under the digits`)
+
+  // ---- density: the preset changes the count and outlives a reload ----
+  const counts = await page.evaluate(async () => {
+    const out = {}
+    for (const d of ['light', 'dense', 'medium']) {
+      window.__store.getState().setWatermarkDensity(d)
+      await new Promise((r) => setTimeout(r, 120))
+      out[d] = {
+        stamps: window.__stage.find('.watermark').length,
+        opacity: window.__stage.find('.watermark-grid')[0]?.opacity(),
       }
     }
-    // z-order: the watermark group comes after the objects group on its layer
-    const wmGroup = window.__stage.find('.watermarks')[0]
-    // (nodeType, not className: the production build has no class names)
-    const above = wmGroup ? wmGroup.getZIndex() > 0 && wmGroup.getParent().nodeType === 'Layer' : false
-    return {
-      text: node ? node.text() : null,
-      font: node ? node.fontFamily() : null,
-      glyphPct: (glyph / n) * 100,
-      loud,
-      railText: rail ? rail.text() : null,
-      railGlyphPct: railN ? (railGlyph / railN) * 100 : 0,
-      above,
-    }
+    window.__store.getState().setWatermarkDensity('dense')
+    return out
   })
-  check(`${label}: the rail plate carries the name`, wm.railText === 'Алексей Соць', String(wm.railText))
-  check(`${label}: the rail plate is engraved into the wood`, wm.railGlyphPct >= 10, `${wm.railGlyphPct.toFixed(0)}% of samples on letters`)
-  check(`${label}: the watermark group is drawn above the objects`, wm.above === true)
-  // nothing on the table can cover it: a zone over the whole cloth and a ball on the name
-  await page.evaluate(() => {
-    const st = window.__store.getState()
-    st.addItem({ id: 'v-cover', type: 'zone', x: 0, y: 0, w: 3550, h: 1775, shape: 'rect', color: '#1D6FA8', opacity: 0.25 }, 'top')
-    st.addBall('white', { x: 1775, y: 887.5 })
-    st.select(null)
-  })
-  await page.waitForTimeout(300)
-  const covered = await page.evaluate(() => {
-    const layers = [...document.querySelectorAll('.konvajs-content canvas')]
-    const canvas = document.createElement('canvas')
-    canvas.width = layers[0].width
-    canvas.height = layers[0].height
-    const g = canvas.getContext('2d')
-    for (const l of layers) g.drawImage(l, 0, 0)
-    const L = window.__layout
-    const dpr = canvas.width / parseFloat(layers[0].style.width)
-    const img = g.getImageData(0, 0, canvas.width, canvas.height).data
-    // takes a point in table mm; a sample off the canvas is NaN and counts for nothing
-    const luma = ({ x: mx, y: my }) => {
-      const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
-      const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
-      const i = (Math.round(sy * dpr) * canvas.width + Math.round(sx * dpr)) * 4
-      return 0.299 * img[i] + 0.587 * img[i + 1] + 0.114 * img[i + 2]
-    }
-    const sc = window.__store.getState().scene
-    const LEN = sc.table.lengthMm, WID = sc.table.widthMm
-    const cx = LEN / 2, cy = WID / 2
-    const tilt = Math.atan2(WID, LEN)
-    const dir = L.rotation === 90 ? { x: -Math.cos(tilt), y: -Math.sin(tilt) } : { x: Math.cos(tilt), y: -Math.sin(tilt) }
-    const along = (t) => ({ x: cx + dir.x * t + dir.y * 40, y: cy + dir.y * t - dir.x * 40 })
-    const base = luma({ x: cx + dir.y * 500, y: cy - dir.x * 500 })
-    const onMarking = (p) =>
-      [LEN / 4, LEN / 2, (3 * LEN) / 4].some((x) => Math.abs(p.x - x) < 12) || Math.abs(p.y - WID / 2) < 12
-    let glyph = 0, n = 0
-    for (let t = -1500; t <= 1500; t += 4) {
-      const p = along(t)
-      if (onMarking(p) || Math.hypot(p.x - cx, p.y - cy) < 60) continue
-      n++
-      const d = Math.abs(luma(p) - base)
-      if (d >= 4 && d <= 60) glyph++
-    }
-    return (glyph / n) * 100
-  })
-  check(`${label}: a zone over the whole cloth does not hide the watermark`, covered >= 8, `${covered.toFixed(0)}% of samples on glyphs`)
-  await page.evaluate(() => {
-    const st = window.__store.getState()
-    st.select('v-cover')
-    st.removeSelected()
-  })
-  check(`${label}: the watermark text node is on the table`, wm.text === 'Алексей Соць', String(wm.text))
-  check(`${label}: the watermark uses the serif face`, wm.font === 'Exercise Serif', String(wm.font))
-  const wmFont = await page.evaluate(() => document.fonts.check('italic 800 16px "Exercise Serif"', 'Алексей Соць'))
-  check(`${label}: the watermark font is loaded from our origin`, wmFont === true)
-  check(`${label}: the watermark is visible on the cloth`, wm.glyphPct >= 8, `${wm.glyphPct.toFixed(0)}% of samples on glyphs`)
-  check(`${label}: ...and faint`, wm.loud === 0, `${wm.loud} loud samples`)
+  check(`${label}: the density preset changes how many signatures there are`, counts.light.stamps === 12 && counts.dense.stamps === 16, `light ${counts.light.stamps}, dense ${counts.dense.stamps}, medium ${counts.medium.stamps}`)
+  check(`${label}: the quiet preset is the same grid, fainter`, counts.medium.stamps === 12 && counts.medium.opacity < counts.light.opacity, `${counts.medium.opacity} vs ${counts.light.opacity}`)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForTimeout(700)
+  const kept = await page.evaluate(() => ({
+    density: window.__store.getState().watermarkDensity,
+    stamps: window.__stage.find('.watermark').length,
+  }))
+  check(`${label}: the density survives a reload`, kept.density === 'dense' && kept.stamps === 16, `${kept.density}, ${kept.stamps} stamps`)
+  await page.evaluate(() => window.__store.getState().setWatermarkDensity('light'))
+  await page.waitForTimeout(150)
+
+  // ---- the old mark is gone ----
+  const oldMark = await page.evaluate(() => ({
+    // document.fonts.check answers "can this be drawn", fallback included, so
+    // it says yes for a family that no longer exists: list the faces instead
+    faces: [...document.fonts].map((f) => f.family).join(' '),
+    rotated: window.__stage.find('.watermark').filter((n) => Math.abs(n.rotation()) > 0.01).length,
+    railed: window.__stage.find('.watermark-rail').length,
+  }))
+  const shipped = fs.readdirSync(path.join(process.cwd(), 'dist', 'fonts'))
+  const bundle = fs
+    .readdirSync(path.join(process.cwd(), 'dist', 'assets'))
+    .filter((f) => f.endsWith('.js') || f.endsWith('.css'))
+    .map((f) => fs.readFileSync(path.join(process.cwd(), 'dist', 'assets', f), 'utf8'))
+    .join('')
+  check(`${label}: no Playfair Display in the build`, !shipped.some((f) => /watermark-(cyrillic|latin)|playfair/i.test(f)) && !/Exercise Serif|Playfair/.test(bundle), shipped.join(' '))
+  check(`${label}: no diagonal signature left on the cloth`, oldMark.rotated === 0 && !/Serif|Playfair/.test(oldMark.faces), `${oldMark.rotated} rotated, faces: ${oldMark.faces}`)
+  check(`${label}: the signature on the rail is still there`, oldMark.railed === 1)
+}
+
+async function picture(page, label) {
+  await stage4(page, label)
 
   await page.evaluate(() => {
     const st = window.__store.getState()
@@ -652,6 +798,16 @@ async function picture(page, label) {
       return [img[i], img[i + 1], img[i + 2], img[i + 3]]
     }
     const luma = (c) => (c ? 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] : 999)
+    /** the cloth around a point, immune to a signature crossing the sample */
+    const clothAround = (cx, cy, r) => {
+      const ring = []
+      for (let a = 0; a < 360; a += 30) {
+        const c = at(cx + Math.cos((a * Math.PI) / 180) * r, cy + Math.sin((a * Math.PI) / 180) * r)
+        if (c && c[3] > 200) ring.push(luma(c))
+      }
+      ring.sort((p, q) => p - q)
+      return ring.length ? ring[Math.floor(ring.length / 2)] : 999
+    }
     const LEN = scene.table.lengthMm, WID = scene.table.widthMm, D = scene.table.ballMm, r = D / 2
     const CUSHION = 55, BAND = 180
 
@@ -682,7 +838,7 @@ async function picture(page, label) {
 
     // ball: lit width through the centre, against the cloth just below it
     const ball = scene.items.find((i) => i.type === 'ball' && i.x === 1775)
-    const bg = luma(at(ball.x, ball.y + D * 1.5))
+    const bg = clothAround(ball.x, ball.y, D * 1.5)
     let lit = 0
     const n2 = 600
     for (let i = 0; i <= n2; i++) if (Math.abs(luma(at(ball.x - D + (2 * D * i) / n2, ball.y)) - bg) > 12) lit++
@@ -690,7 +846,7 @@ async function picture(page, label) {
 
     // ghost: the same measurement on the first ghost, which is nearly opaque
     const gh = scene.items.find((i) => i.id === 'v-ghost')
-    const gbg = luma(at(gh.from.x, gh.from.y + D * 1.5))
+    const gbg = clothAround(gh.from.x, gh.from.y, D * 1.5)
     let glit = 0
     for (let i = 0; i <= n2; i++) if (Math.abs(luma(at(gh.from.x - D + (2 * D * i) / n2, gh.from.y)) - gbg) > 10) glit++
     const ghostMm = (glit / n2) * 2 * D

@@ -129,6 +129,8 @@ export type PowerItem = ItemBase & {
   x: number
   y: number
   value: PowerValue
+  /** plate width in table mm; the height follows from the artboard ratio */
+  widthMm: number
 }
 
 /**

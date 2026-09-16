@@ -36,7 +36,9 @@ import {
   ghostCount,
 } from '../model/style'
 import { freeSpot, housePoint, newId, pyramidBalls, resolveOverlap, snapPoint, snapTouch } from '../lib/place'
-import { loadScene } from '../lib/storage'
+import { loadDensity, loadScene, saveDensity } from '../lib/storage'
+import type { Density } from '../brand/watermark'
+import { DEFAULT_DENSITY } from '../brand/watermark'
 
 export const HISTORY_LIMIT = 50
 
@@ -79,6 +81,8 @@ export type AppState = {
   orientationAuto: boolean
   snap: boolean
   noOverlap: boolean
+  /** how many signatures the cloth carries; a screen setting, not scene data */
+  watermarkDensity: Density
   past: Scene[]
   future: Scene[]
 
@@ -86,6 +90,7 @@ export type AppState = {
   setTool: (tool: Tool) => void
   setOrientation: (o: Orientation) => void
   autoOrientation: (o: Orientation) => void
+  setWatermarkDensity: (d: Density) => void
   toggleSnap: () => void
   toggleNoOverlap: () => void
   toggleMarkings: () => void
@@ -137,6 +142,15 @@ export type AppState = {
   beginHistory: () => void
   undo: () => void
   redo: () => void
+}
+
+/** the saved density, or the default if storage is empty or unreadable */
+const initialDensity = (): Density => {
+  try {
+    return loadDensity()
+  } catch {
+    return DEFAULT_DENSITY
+  }
 }
 
 const emptyScene = (): Scene => ({
@@ -197,6 +211,7 @@ export const useStore = create<AppState>()(
       orientationAuto: true,
       snap: true,
       noOverlap: true,
+      watermarkDensity: initialDensity(),
       past: [],
       future: [],
 
@@ -214,6 +229,10 @@ export const useStore = create<AppState>()(
         set((s) => {
           if (s.orientationAuto) s.orientation = o
         }),
+      setWatermarkDensity: (d) => {
+        saveDensity(d)
+        set((s) => void (s.watermarkDensity = d))
+      },
       toggleSnap: () => set((s) => void (s.snap = !s.snap)),
       toggleNoOverlap: () => set((s) => void (s.noOverlap = !s.noOverlap)),
 

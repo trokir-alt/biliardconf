@@ -57,26 +57,6 @@ export const METAL = {
 }
 
 export const MARKING = 'rgba(255,255,255,0.38)'
-/** the coach's name, faint on the cloth; it is part of the table, so every
-    export carries it */
-export const WATERMARK = {
-  text: 'Алексей Соць',
-  fill: '#FFFFFF',
-  opacity: 0.13,
-  /** font size in mm, along the table's diagonal (3969 mm on a 12-ft table) */
-  sizeMm: 380,
-  letterSpacingMm: 8,
-  /** the maker's plate on the wooden rail: engraved dark, a light edge below */
-  rail: {
-    sizeMm: 44,
-    letterSpacingMm: 3,
-    ink: 'rgba(28,14,6,0.8)',
-    highlight: 'rgba(255,226,180,0.32)',
-    /** where along the long rail, as a fraction of the length: between the
-        sights at 5/8 and 6/8 */
-    at: 5.5 / 8,
-  },
-}
 export const MARKING_SPOT = 'rgba(255,255,255,0.72)'
 export const SIGHT = '#F4F0E7'
 export const POCKET_THROAT = '#0A0705'

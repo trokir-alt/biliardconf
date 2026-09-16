@@ -15,8 +15,13 @@
 import type { ClothColor, Item, PowerValue, Scene } from '../model/types'
 import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE } from '../model/table'
+import { POWER_DEFAULT_MM, POWER_MAX_MM, POWER_MIN_MM } from '../model/item'
+import { DEFAULT_DENSITY, isDensity, type Density } from '../brand/watermark'
 
 const KEY = 'biliardconf.scene.v1'
+/** the watermark density is a setting, not scene data: it belongs to the
+    coach and their screen, not to the exercise they are drawing */
+const DENSITY_KEY = 'biliardconf.watermark.v1'
 const DEBOUNCE_MS = 500
 
 const num = (v: unknown, fallback: number): number =>
@@ -138,7 +143,8 @@ function parseItem(raw: unknown): Item | null {
       const p = vec(o)
       if (!p) return null
       const value = (POWER_VALUES as readonly number[]).includes(o.value as number) ? (o.value as PowerValue) : 2.5
-      return { id, type: 'power', x: p.x, y: p.y, value }
+      const widthMm = Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, num(o.widthMm, POWER_DEFAULT_MM)))
+      return { id, type: 'power', x: p.x, y: p.y, value, widthMm }
     }
     case 'ghostBall': {
       const p = vec(o)
@@ -216,5 +222,23 @@ export function clearSaved(): void {
     window.localStorage.removeItem(KEY)
   } catch {
     // nothing to do
+  }
+}
+
+/** The watermark density the coach last chose. Anything odd reads as the default. */
+export function loadDensity(): Density {
+  try {
+    const raw = window.localStorage.getItem(DENSITY_KEY)
+    return isDensity(raw) ? raw : DEFAULT_DENSITY
+  } catch {
+    return DEFAULT_DENSITY
+  }
+}
+
+export function saveDensity(d: Density): void {
+  try {
+    window.localStorage.setItem(DENSITY_KEY, d)
+  } catch {
+    // private mode, or storage full: the choice just does not outlive the tab
   }
 }

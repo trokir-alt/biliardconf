@@ -1,89 +1,71 @@
 /**
- * The coach's name, twice: big and faint along the diagonal of the cloth, and
- * small and engraved on the wooden rail.
+ * The distributed watermark: the coach's signature repeated across the cloth,
+ * plus one on the wooden rail.
  *
- * It is not scene data and there is no switch for it. It is drawn on the
- * scene layer AFTER every object, so no zone, caption or ball can cover it,
- * and it goes into every export and clipboard copy because those read the
- * same layers. The rail plate sits where no object can be placed at all.
+ * Two things about it are deliberate and both differ from the package.
+ *
+ * It sits directly above the cloth and below every object. The package puts it
+ * above the trajectories, and on a real export that erases them: a ghost trail
+ * fades along its run, and its last two ghosts clear the cloth by 63 and 30
+ * levels of red while the white mark adds 55 at 26 per cent. A mark laid over
+ * them is the brighter of the two and wipes out the tail - which is the part
+ * of the diagram that says where the ball ends up. Underneath, the same mark
+ * reads just as well and is no easier to crop away.
+ *
+ * Density is a setting rather than a constant, because the right amount of it
+ * depends on how busy the coach's own diagrams are. All three presets live in
+ * src/brand/watermark.ts.
+ *
+ * It has its own Konva layer: it never changes while an object is dragged, so
+ * it should not be repainted sixty times a second either.
  */
 
-import { Group, Text } from 'react-konva'
+import { Group, Image as KImage } from 'react-konva'
 import type { TableGeometry } from '../model/table'
 import { CUSHION_MM, RAIL_MM } from '../model/table'
-import { WATERMARK_FONT } from '../model/fonts'
-import { WATERMARK } from '../model/theme'
-import { useStore } from '../state/store'
+import { STAMP_SVG, WATERMARK_ARTBOARD } from '../brand/assets'
+import { svgImage, useSvgImages } from '../brand/svgImage'
+import { DENSITY, stampLayout, type Density } from '../brand/watermark'
 
-/**
- * Along the diagonal, reading from the lower left up to the upper right of
- * the screen: on the flat table that is the diagonal from (0, W) to (L, 0);
- * on the upright table the layer turns a quarter clockwise, so the same
- * screen reading takes the other diagonal, from (L, W) to (0, 0).
- */
-function Diagonal({ g }: { g: TableGeometry }) {
-  const upright = useStore((s) => s.orientation) === 'vertical'
-  const L = g.lengthMm
-  const W = g.widthMm
-  const diag = Math.hypot(L, W)
-  const tilt = (Math.atan2(W, L) * 180) / Math.PI // 26.6 degrees on a 2:1 table
-  const rotation = upright ? tilt - 180 : -tilt
-  return (
-    <Group x={L / 2} y={W / 2} rotation={rotation} listening={false}>
-      <Text
-        name="watermark"
-        x={-diag / 2}
-        y={-WATERMARK.sizeMm / 2}
-        width={diag}
-        align="center"
-        text={WATERMARK.text}
-        fontFamily={WATERMARK_FONT}
-        fontSize={WATERMARK.sizeMm}
-        fontStyle="italic 800"
-        letterSpacing={WATERMARK.letterSpacingMm}
-        fill={WATERMARK.fill}
-        opacity={WATERMARK.opacity}
-        listening={false}
-      />
-    </Group>
-  )
-}
+/** height of the rail signature, in mm; the rail band itself is 125 mm */
+const RAIL_STAMP_H = 62
+/** where along the long rail it sits, as a fraction of the table length */
+const RAIL_AT = 5.5 / 8
+/** white on dark wood: present, not shouting */
+const RAIL_OPACITY = 0.5
 
-/** The maker's plate on the near long rail, between two sights. */
-function RailPlate({ g }: { g: TableGeometry }) {
-  const r = WATERMARK.rail
-  const cx = g.lengthMm * r.at
-  const cy = g.widthMm + CUSHION_MM + RAIL_MM / 2
-  const w = g.lengthMm / 8 // one sight interval; the text is centred in it
-  const text = (fill: string, dx: number, dy: number, name?: string) => (
-    <Text
-      name={name}
-      x={cx - w / 2 + dx}
-      y={cy - r.sizeMm / 2 + dy}
-      width={w}
-      align="center"
-      text={WATERMARK.text}
-      fontFamily={WATERMARK_FONT}
-      fontSize={r.sizeMm}
-      fontStyle="italic 800"
-      letterSpacing={r.letterSpacingMm}
-      fill={fill}
-      listening={false}
-    />
-  )
-  return (
-    <Group listening={false}>
-      {text(r.highlight, 1.4, 1.4)}
-      {text(r.ink, 0, 0, 'watermark-rail')}
-    </Group>
-  )
-}
+export function Watermark({ g, density }: { g: TableGeometry; density: Density }) {
+  useSvgImages() // redraw once the SVG has decoded
+  const img = svgImage(STAMP_SVG)
+  if (!img) return null
 
-export function Watermarks({ g }: { g: TableGeometry }) {
+  const preset = DENSITY[density]
+  const stamps = stampLayout(density, g.lengthMm)
+
+  // the rail copy: same artwork, scaled to the rail band
+  const railScale = RAIL_STAMP_H / WATERMARK_ARTBOARD.stampH
+  const railW = WATERMARK_ARTBOARD.stampW * railScale
+  const railX = g.lengthMm * RAIL_AT - railW / 2
+  const railY = g.widthMm + CUSHION_MM + (RAIL_MM - RAIL_STAMP_H) / 2
+
   return (
     <Group name="watermarks" listening={false}>
-      <Diagonal g={g} />
-      <RailPlate g={g} />
+      {/* one opacity for the whole grid, as the package specifies */}
+      <Group name="watermark-grid" opacity={preset.opacity} listening={false}>
+        {stamps.map((s, i) => (
+          <KImage key={i} name="watermark" image={img} x={s.x} y={s.y} width={s.w} height={s.h} listening={false} />
+        ))}
+      </Group>
+      <KImage
+        name="watermark-rail"
+        image={img}
+        x={railX}
+        y={railY}
+        width={railW}
+        height={RAIL_STAMP_H}
+        opacity={RAIL_OPACITY}
+        listening={false}
+      />
     </Group>
   )
 }

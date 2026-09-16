@@ -11,8 +11,8 @@
  */
 export const CANVAS_FONT = 'Exercise Sans'
 
-/** the watermark: Playfair Display ExtraBold Italic, also from public/fonts */
-export const WATERMARK_FONT = 'Exercise Serif'
+/** the brand face, self-hosted for the same reason: Manrope, SIL OFL 1.1 */
+export const BRAND_FONT = 'Manrope'
 
 /** what to fall back to while the woff2 is still in flight */
 export const CANVAS_FONT_STACK =
@@ -29,7 +29,8 @@ export async function fontsReady(): Promise<void> {
     await Promise.all([
       document.fonts.load(`16px "${CANVAS_FONT}"`),
       document.fonts.load(`bold 16px "${CANVAS_FONT}"`),
-      document.fonts.load(`italic 800 16px "${WATERMARK_FONT}"`, 'Алексей Соць'),
+      document.fonts.load(`600 16px "${BRAND_FONT}"`),
+      document.fonts.load(`700 16px "${BRAND_FONT}"`),
     ])
   } catch {
     // no font API, or loading refused: fall through and draw with the fallback

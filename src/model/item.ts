@@ -7,6 +7,7 @@
 
 import type { Item, Vec } from './types'
 import { quadControl } from './style'
+import { POWER_ARTBOARD } from '../brand/assets'
 
 export type Rect = { x: number; y: number; w: number; h: number }
 
@@ -44,15 +45,13 @@ export function itemBounds(item: Item, ballMm: number): Rect {
       return box([item.x], [item.y], ballMm / 2)
     case 'strikePoint':
       return box([item.x], [item.y], item.sizeMm / 2)
-    case 'power':
+    case 'power': {
       // the plate plus its +/- buttons: on the upright table those sit below
       // the plate, right where a floating panel would otherwise land
-      return {
-        x: item.x - POWER_W / 2 - POWER_BTN_MM,
-        y: item.y - POWER_H / 2,
-        w: POWER_W + 2 * POWER_BTN_MM,
-        h: POWER_H,
-      }
+      const { w, h } = powerSize(item)
+      const reach = powerButtonReach(w)
+      return { x: item.x - w / 2 - reach, y: item.y - h / 2, w: w + 2 * reach, h }
+    }
     case 'ghostBall':
       return box([item.x], [item.y], ballMm / 2)
     case 'text':
@@ -72,11 +71,30 @@ export function itemBounds(item: Item, ballMm: number): Rect {
 /** The draggable handles of an item, in draw order. */
 export type Handle = { id: string; at: Vec; kind: 'end' | 'bend' | 'corner' | 'rotate' | 'resize' }
 
-/** the strength plate, in mm */
-export const POWER_W = 420
-export const POWER_H = 100
-/** how far the +/- buttons reach past each end of the plate, in mm */
-export const POWER_BTN_MM = 66
+/**
+ * The strength indicator, in mm. The designer's artboard is 140 x 88 against a
+ * 1120-wide cloth - exactly one eighth of it - so on a 3550 mm table the
+ * default plate is 444 x 279 mm.
+ */
+export const POWER_RATIO = POWER_ARTBOARD.h / POWER_ARTBOARD.w
+export const POWER_MIN_MM = 300
+export const POWER_MAX_MM = 600
+export const POWER_DEFAULT_MM = 444
+
+/** width chosen for a table of this length, kept inside the allowed range */
+export function defaultPowerWidth(lengthMm: number): number {
+  return Math.round(Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, lengthMm / 8)))
+}
+
+export function powerSize(item: { widthMm: number }): { w: number; h: number } {
+  const w = Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, item.widthMm))
+  return { w, h: w * POWER_RATIO }
+}
+
+/** how far the +/- buttons reach past each end of the plate */
+export function powerButtonReach(w: number): number {
+  return w * 0.157
+}
 /** the strike-point ball may be resized between these */
 export const STRIKE_MIN_MM = 200
 export const STRIKE_MAX_MM = 500
@@ -110,6 +128,12 @@ export function itemHandles(item: Item): Handle[] {
       ]
     case 'text':
       return [{ id: 'rotate', at: { x: item.x, y: item.y - item.size * 1.5 }, kind: 'rotate' }]
+    case 'power': {
+      // the corner of the plate itself: the aspect is locked, so one handle
+      // is the whole story
+      const { w, h } = powerSize(item)
+      return [{ id: 'size', at: { x: item.x + w / 2, y: item.y + h / 2 }, kind: 'resize' }]
+    }
     case 'strikePoint': {
       // the size handle sits OUTSIDE the ball, at 1.3 r on the 45-degree
       // diagonal: on the rim it collided with the dot (which may go to 0.9 r)
@@ -153,6 +177,13 @@ export function dragHandle(item: Item, handleId: string, to: Vec): Partial<Item>
     case 'text': {
       const angle = (Math.atan2(to.y - item.y, to.x - item.x) * 180) / Math.PI + 90
       return { angle: Math.round(angle) } as Partial<Item>
+    }
+    case 'power': {
+      // the handle rides the corner, so the drag distance is the half
+      // diagonal; the locked aspect turns it back into a width
+      const d = Math.hypot(to.x - item.x, to.y - item.y)
+      const width = (2 * d) / Math.hypot(1, POWER_RATIO)
+      return { widthMm: Math.round(Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, width))) } as Partial<Item>
     }
     case 'strikePoint': {
       const size = (2 * Math.hypot(to.x - item.x, to.y - item.y)) / STRIKE_HANDLE_K

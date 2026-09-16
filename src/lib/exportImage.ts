@@ -13,6 +13,7 @@
 
 import type Konva from 'konva'
 import { CANVAS_FONT } from '../model/fonts'
+import { brandImagesReady } from '../brand/svgImage'
 import { fontsReady } from '../model/fonts'
 
 export type ExportFormat = 'png' | 'jpeg'
@@ -116,14 +117,15 @@ function wrap(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, max
  * picture and the caption lands a few pixels off from what the coach saw.
  */
 export async function renderExport(stage: Konva.Stage, opts: ExportOptions): Promise<HTMLCanvasElement> {
-  await fontsReady()
+  await Promise.all([fontsReady(), brandImagesReady()])
   // the caller has just dropped the selection and the pinch zoom; give React
   // two frames to push those into the Konva nodes, or the picture would carry
   // the selection ring or come out as a zoomed-in crop
   await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
   // the name on the table is part of every picture: anything that hid it
   // from the devtools console is undone before the layers are read
-  stage.find('.watermark, .watermark-rail, .watermarks').forEach((n) => n.show())
+  stage.find('.watermark, .watermark-rail, .watermark-grid, .watermarks').forEach((n) => n.show())
+  stage.getLayers().forEach((l) => l.show())
   stage.batchDraw()
 
   const pixelRatio = safePixelRatio(stage, opts.pixelRatio)

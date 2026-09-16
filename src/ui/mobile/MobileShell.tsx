@@ -14,6 +14,8 @@ import { useView } from '../../state/view'
 import { BALL_SIZES } from '../../model/table'
 import type { ExportFormat } from '../../lib/exportImage'
 import { GLYPH, TOOLS } from '../tools'
+import { BrandSign } from '../Brand'
+import { DensityPicker } from '../DensityPicker'
 import { Sheet } from './Sheet'
 
 export type MobileShellProps = {
@@ -41,6 +43,7 @@ export function MobileShell({ stageRef, onExport, onCopy }: MobileShellProps) {
   return (
     <div className="m-shell">
       <header className="m-top">
+        <BrandSign size={32} />
         <input
           className="m-top__title"
           type="text"
@@ -208,6 +211,8 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </button>
         </span>
       </div>
+      <DensityPicker id="density-mobile" />
+
       <div className="row">
         <span className="row__label">Сукно</span>
         <span className="row__control">

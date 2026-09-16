@@ -21,6 +21,8 @@ export type ToolbarProps = {
 const EXPORT_SCALES = [1, 2, 3]
 
 import { TOOLS } from './tools'
+import { BrandLockup } from './Brand'
+import { DensityPicker } from './DensityPicker'
 
 export function Toolbar({ onExport, onCopy }: ToolbarProps) {
   const tool = useStore((s) => s.tool)
@@ -56,6 +58,9 @@ export function Toolbar({ onExport, onCopy }: ToolbarProps) {
 
   return (
     <aside className="toolbar">
+      <div className="brand">
+        <BrandLockup />
+      </div>
       <section className="tool-group">
         <h2 className="tool-group__title">Инструменты</h2>
         <div className="tool-group__body tool-grid">
@@ -180,6 +185,8 @@ export function Toolbar({ onExport, onCopy }: ToolbarProps) {
               <span className="row__unit">мм</span>
             </span>
           </div>
+
+          <DensityPicker id="density-desktop" />
 
           <label className="switch">
             <span className="switch__label">Разметка</span>

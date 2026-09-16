@@ -6,7 +6,7 @@
  * branch in ItemView.
  */
 
-import { Circle, Ellipse, Group, Line as KLine, Rect, Shape, Text } from 'react-konva'
+import { Circle, Ellipse, Group, Image as KImage, Line as KLine, Rect, Shape, Text } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
 import type { Shape as KonvaShape } from 'konva/lib/Shape'
 import type { KonvaEventObject } from 'konva/lib/Node'
@@ -22,7 +22,9 @@ import type {
   ZoneItem,
 } from '../model/types'
 import { POWER_VALUES } from '../model/types'
-import { POWER_H, POWER_W, arrowCurve, formatPower, settleDot } from '../model/item'
+import { arrowCurve, powerButtonReach, powerSize, settleDot } from '../model/item'
+import { BRAND, POWER_ARTBOARD, POWER_SVGS } from '../brand/assets'
+import { svgImage, useSvgImages } from '../brand/svgImage'
 import { CANVAS_FONT } from '../model/fonts'
 import { BALL } from '../model/theme'
 
@@ -286,9 +288,18 @@ export function StrikePointShape({ item, scale, onDot, onDotStart }: StrikePoint
   )
 }
 
-const SEG_W = 22
-const SEG_H = 46
-const SEG_GAP = 6
+/**
+ * The designer's segment geometry, in artboard units: nine boxes at
+ * x = 12 + 13i, y = 56, 10 wide. Only the tap targets are rebuilt here - the
+ * picture itself is the SVG the package ships.
+ */
+const SEG_X0 = 12
+const SEG_PITCH = 13
+const SEG_W = 10
+/** the band the segments live in; the digits sit above it and stay tappable
+    only as "select the plate", not as "set a value" */
+const SEG_BAND_TOP = 48
+const SEG_BAND_BOTTOM = 88
 
 export type PowerProps = {
   item: PowerItem
@@ -298,23 +309,28 @@ export type PowerProps = {
 }
 
 /**
- * The strength plate. Nine segments, no colour semantics - it is the coach's
- * scale, not ours - and the value written the way a coach writes it, "2,5".
+ * The strength indicator: the designer's own artboard, drawn as an image.
+ *
+ * Nine states ship as nine SVG documents, so the picture is never redrawn by
+ * hand here - `2 * value` filled segments and the digits with a comma are
+ * baked into the asset. What this component adds is the things an asset
+ * cannot carry: the tap targets over the segments and the +/- buttons that
+ * appear when the plate is selected.
  */
 export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
-  const w = POWER_W
-  const h = POWER_H
-  const segsW = POWER_VALUES.length * SEG_W + (POWER_VALUES.length - 1) * SEG_GAP
-  // label | nine segments | value, laid out so "2,5" never wraps
-  const segX0 = -w / 2 + 74
-  const valX = segX0 + segsW + 8
-  const valW = w / 2 - valX - 12
+  useSvgImages() // re-render once the SVGs have decoded
+  const { w, h } = powerSize(item)
+  const sx = w / POWER_ARTBOARD.w
+  const sy = h / POWER_ARTBOARD.h
+  const img = svgImage(POWER_SVGS[POWER_VALUES.indexOf(item.value)] ?? POWER_SVGS[4])
+  const reach = powerButtonReach(w)
+  const btnR = reach * 0.4
   const stop = (e: KonvaEventObject<Event>) => {
     e.cancelBubble = true
   }
   const btn = (sign: -1 | 1) => (
     <Group
-      x={sign * (w / 2 + 40)}
+      x={sign * (w / 2 + reach * 0.6)}
       y={0}
       onClick={(e) => {
         stop(e)
@@ -325,17 +341,17 @@ export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
         onStep(sign)
       }}
     >
-      <Circle radius={26} fill="rgba(20,25,32,0.9)" stroke={ORANGE} strokeWidth={2} />
+      <Circle radius={btnR} fill={BRAND.navy} stroke="rgba(255,255,255,0.7)" strokeWidth={btnR * 0.07} />
       <Text
         text={sign > 0 ? '+' : '−'}
-        fontSize={34}
+        fontSize={btnR * 1.3}
         fontFamily={CANVAS_FONT}
         fontStyle="bold"
         fill="#FFFFFF"
-        width={52}
-        height={52}
-        offsetX={26}
-        offsetY={26}
+        width={btnR * 2}
+        height={btnR * 2}
+        offsetX={btnR}
+        offsetY={btnR}
         align="center"
         verticalAlign="middle"
         listening={false}
@@ -344,39 +360,17 @@ export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
   )
   return (
     <Group x={item.x} y={item.y}>
-      <Rect
-        x={-w / 2}
-        y={-h / 2}
-        width={w}
-        height={h}
-        cornerRadius={22}
-        fill="rgba(20,25,32,0.78)"
-        stroke="rgba(255,255,255,0.18)"
-        strokeWidth={1.5}
-      />
-      <Text
-        x={-w / 2 + 18}
-        y={-h / 2}
-        height={h}
-        verticalAlign="middle"
-        text="Сила"
-        fontSize={22}
-        fontFamily={CANVAS_FONT}
-        fill="#C8D0D8"
-        listening={false}
-      />
+      {img && <KImage image={img} x={-w / 2} y={-h / 2} width={w} height={h} />}
+      {/* the plate is one flat picture, so the segments get their own
+          invisible targets, one pitch wide so a finger has something to hit */}
       {POWER_VALUES.map((v, i) => (
         <Rect
           key={v}
-          x={segX0 + i * (SEG_W + SEG_GAP)}
-          y={-SEG_H / 2}
-          width={SEG_W}
-          height={SEG_H}
-          cornerRadius={4}
-          fill={item.value >= v ? ORANGE : 'rgba(0,0,0,0)'}
-          stroke={item.value >= v ? ORANGE : 'rgba(255,255,255,0.55)'}
-          strokeWidth={2}
-          hitStrokeWidth={SEG_GAP}
+          x={-w / 2 + (SEG_X0 + i * SEG_PITCH - (SEG_PITCH - SEG_W) / 2) * sx}
+          y={-h / 2 + SEG_BAND_TOP * sy}
+          width={SEG_PITCH * sx}
+          height={(SEG_BAND_BOTTOM - SEG_BAND_TOP) * sy}
+          fill="rgba(0,0,0,0)"
           onClick={(e) => {
             stop(e)
             onValue(v)
@@ -387,21 +381,6 @@ export function PowerShape({ item, selected, onValue, onStep }: PowerProps) {
           }}
         />
       ))}
-      <Text
-        x={valX}
-        y={-h / 2}
-        width={valW}
-        height={h}
-        align="right"
-        verticalAlign="middle"
-        wrap="none"
-        text={formatPower(item.value)}
-        fontSize={40}
-        fontFamily={CANVAS_FONT}
-        fontStyle="bold"
-        fill="#FFFFFF"
-        listening={false}
-      />
       {selected && btn(-1)}
       {selected && btn(1)}
     </Group>

@@ -14,7 +14,7 @@ import Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { Item, Vec } from '../model/types'
 import { buildGeometry, clampToField } from '../model/table'
-import { dragHandle, type Handle } from '../model/item'
+import { dragHandle, defaultPowerWidth, type Handle } from '../model/item'
 import { DEFAULT_ZONE_COLOR, ZONE_OPACITY, ghostCount } from '../model/style'
 import { newId, resolveOverlap, snapPoint } from '../lib/place'
 import { publishDebug } from '../lib/debug'
@@ -23,7 +23,7 @@ import { useView } from '../state/view'
 import { ItemView } from './ItemView'
 import { Handles } from './Handles'
 import { TableView } from './TableView'
-import { Watermarks } from './Watermark'
+import { Watermark } from './Watermark'
 import { ZOOM_MAX, ZOOM_MIN, clampPan, computeLayout, pxToMm, type StageLayout, type Viewport } from './layout'
 
 /** below this the table is turned upright, spec section 9 */
@@ -78,6 +78,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
   const selectedId = useStore((s) => s.selectedId)
   const tool = useStore((s) => s.tool)
   const orientation = useStore((s) => s.orientation)
+  const density = useStore((s) => s.watermarkDensity)
   const setEditing = useView((s) => s.setEditing)
   const viewport = useView((s) => s.viewport)
 
@@ -200,7 +201,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
           st.tool === 'strike'
             ? { id, type: 'strikePoint', x: p.x, y: p.y, sizeMm: 300, dot: { u: 0, v: 0 } }
             : st.tool === 'power'
-              ? { id, type: 'power', x: p.x, y: p.y, value: 2.5 }
+              ? { id, type: 'power', x: p.x, y: p.y, value: 2.5, widthMm: defaultPowerWidth(st.scene.table.lengthMm) }
               : { id, type: 'ghostBall', x: p.x, y: p.y }
         // widgets sit above the balls and arrows, below the captions
         st.addItem(item, st.tool === 'ghost-ball' ? 'top' : 'belowText')
@@ -744,6 +745,19 @@ export function SceneStage({ stageRef }: SceneStageProps) {
           >
             <TableView g={g} />
           </Layer>
+          {/* The watermark is its own layer, between the cloth and everything
+              drawn on it: it never changes while an object is dragged, and it
+              must not sit over a trajectory. */}
+          <Layer
+            listening={false}
+            scaleX={layout.scale}
+            scaleY={layout.scale}
+            x={layout.x}
+            y={layout.y}
+            rotation={layout.rotation}
+          >
+            <Watermark g={g} density={density} />
+          </Layer>
           <Layer
             scaleX={layout.scale}
             scaleY={layout.scale}
@@ -782,8 +796,6 @@ export function SceneStage({ stageRef }: SceneStageProps) {
                 />
               </Group>
             )}
-            {/* over every object, so nothing on the table can cover the name */}
-            <Watermarks g={g} />
             {selecting && selected && selected.type !== 'ball' && selected.type !== 'ghostBall' && (
               <Handles
                 item={selected}
