@@ -627,7 +627,7 @@ async function stage3(page, label) {
   await page.evaluate(() => {
     const st = window.__store.getState()
     st.addItem({ id: 'cap', type: 'text', x: 500, y: 500, text: 'Подпись', size: 90, color: '#FFFFFF', angle: 0 })
-    st.addItem({ id: 'pw2', type: 'power', x: 900, y: 1500, value: 2 }, 'belowText')
+    st.addItem({ id: 'pw2', type: 'power', x: 900, y: 1500, value: 2, widthMm: 90 }, 'belowText')
   })
   sc = await scene(page)
   const iPw = sc.items.findIndex((i) => i.id === 'pw2')

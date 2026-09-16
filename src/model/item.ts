@@ -111,8 +111,18 @@ export function powerCellColour(fromTop: number, spent: boolean): string {
   return spent ? `hsl(${hue}, 72%, 52%)` : `hsl(${hue}, 42%, 21%)`
 }
 
-export function powerSize(item: { widthMm: number }): { w: number; h: number } {
-  const w = Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, item.widthMm))
+/**
+ * The plate's size in mm, with a width that is always a real number.
+ *
+ * A scene handed to us without one - an older autosave, a payload someone
+ * edited - used to come out NaN, and a NaN reaches Konva as a non-finite
+ * gradient stop, which throws inside the layer's draw and takes every object
+ * after it off the picture. One bad field must cost one bad plate, not the
+ * whole table.
+ */
+export function powerSize(item: { widthMm?: number }): { w: number; h: number } {
+  const raw = Number.isFinite(item.widthMm) ? (item.widthMm as number) : POWER_DEFAULT_MM
+  const w = Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, raw))
   return { w, h: w * POWER_RATIO }
 }
 
