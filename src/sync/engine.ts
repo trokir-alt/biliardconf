@@ -97,8 +97,12 @@ function heldByEditor(id: string): boolean {
   return lib.currentId === id && lib.editorDirty
 }
 
+/** true while this device has never had a successful exchange */
+let firstConnection = true
+
 async function pull(): Promise<boolean> {
   const since = await loadCursor()
+  if (since > 0) firstConnection = false
   const started = Date.now()
   const res = await call(`/api/exercises?since=${since}`)
   if (!res.ok) throw new Offline(`list ${res.status}`)
@@ -324,10 +328,14 @@ async function handleGone(id: string): Promise<void> {
 let running = false
 let wakeUp: (() => void) | null = null
 let nextDelay = POLL_MS
+/** a wake asked for while a pass was already running, to be honoured after it */
+let wakeAsked = false
 
 /** ask the loop to run now instead of at its next tick */
 export function syncNow(): void {
+  wakeAsked = true
   nextDelay = POLL_SOON_MS
+  // null while a pass is in flight; the flag above is what carries the ask
   wakeUp?.()
 }
 
@@ -348,14 +356,18 @@ async function cycle(): Promise<void> {
     let more = await pull()
     // two passes: the first resolves conflicts and mints the copies they
     // leave, the second sends those copies without waiting half a minute
+    const wasFirst = firstConnection
     let sent = await push()
     if ((await dirtyRecords()).length > 0) sent += await push()
-    // the first connection reports what it carried up, once
-    if (sent > 0 && lib.uploaded === null) lib.noteUploaded(sent)
+    // only the very first connection reports a transfer: after that an upload
+    // is just a save, and calling it "перенесено" would be noise
+    if (wasFirst && sent > 0 && lib.uploaded === null) lib.noteUploaded(sent)
+    firstConnection = false
     while (more) more = await pull()
     lib.setSync('synced')
     await lib.refresh()
-    nextDelay = POLL_MS
+    // a change made while this pass ran is not made to wait half a minute
+    nextDelay = wakeAsked ? POLL_SOON_MS : POLL_MS
   } catch (e) {
     if (!(e instanceof Offline)) throw e
     lib.setSync('offline')
@@ -365,6 +377,7 @@ async function cycle(): Promise<void> {
 
 async function loop(signal: AbortSignal): Promise<void> {
   while (!signal.aborted) {
+    wakeAsked = false
     await cycle()
     if (signal.aborted) return
     await sleep(nextDelay)

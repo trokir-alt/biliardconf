@@ -23,6 +23,7 @@ import { useStore } from './state/store'
 import { registerPreviewSource, useLibrary } from './state/library'
 import { startSync, syncNow } from './sync/engine'
 import { Library } from './ui/Library'
+import { publishDebug } from './lib/debug'
 import { useView } from './state/view'
 import { useIsMobile } from './ui/useMedia'
 import { STAMP_SVG } from './brand/assets'
@@ -81,6 +82,9 @@ export function App() {
 
   /* open the library, then keep it in step with the server */
   useEffect(() => {
+    // ?debug=1 only: the acceptance run drives the library and the engine
+    publishDebug('__library', useLibrary)
+    publishDebug('__sync', syncNow)
     let stop: (() => void) | null = null
     void useLibrary
       .getState()

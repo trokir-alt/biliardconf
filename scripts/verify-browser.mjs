@@ -1149,10 +1149,100 @@ async function picture(page, label) {
 
 /* ---------------------------------------------------------- 3. per screen */
 
+
+/* ------------------------------------ 4. the library screen (stage 6) */
+
+/**
+ * The library interface, on whatever screen this run is using. The scenarios
+ * that need two devices and a server live in scripts/verify-sync.mjs; what is
+ * checked here is that the screen itself works at this width - the list, the
+ * trash, and the indicator that tells the coach whether the work got out.
+ *
+ * Every locator is scoped to .library: the toolbar underneath carries buttons
+ * with the same names, and an unscoped query would match both and say nothing
+ * about the screen we are actually looking at.
+ */
+async function stage6(page, label) {
+  const openLibrary = () => page.getByRole('button', { name: /Библиотека/ }).click()
+  const L = page.locator('.library')
+  const titles = () => L.locator('.lib-card__title').allTextContents()
+
+  // whatever is on the table becomes an exercise the moment the library opens
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.addBall('white', { x: 900, y: 800 })
+    st.addBall('cue', { x: 1400, y: 900 })
+    st.setTitle('Упражнение для списка')
+  })
+  await openLibrary()
+  await L.waitFor({ timeout: 20000 })
+  check(`${label}: the library opens`, await L.isVisible())
+  await page.waitForFunction(() => document.querySelectorAll('.lib-card').length >= 1, null, { timeout: 20000 })
+  check(`${label}: the exercise on screen is in the list`, (await titles()).includes('Упражнение для списка'), (await titles()).join(' | '))
+  const badge = (await L.locator('.sync').first().innerText()).trim()
+  check(`${label}: the list says whether the work reached the server`, ['Синхронизировано', 'Есть несохранённое', 'Нет связи'].includes(badge), badge)
+
+  // a thumbnail, or an honest object count where there is none yet
+  const card = L.locator('.lib-card').first()
+  const hasThumb = (await card.locator('img.lib-card__thumb').count()) > 0
+  check(`${label}: a card shows a picture or its object count`, hasThumb || (await card.locator('.lib-card__thumb--empty').count()) > 0, hasThumb ? 'thumbnail' : 'count only')
+
+  const before = (await titles()).length
+  await card.getByRole('button', { name: 'Дублировать' }).click()
+  await page.waitForFunction((n) => document.querySelectorAll('.lib-card').length === n + 1, before, { timeout: 20000 })
+  check(`${label}: duplicate makes a second exercise`, (await titles()).some((t) => t.includes('(копия)')), (await titles()).join(' | '))
+
+  page.once('dialog', (d) => d.accept('Переименовано'))
+  await L.locator('.lib-card').first().getByRole('button', { name: 'Переименовать' }).click()
+  await page.waitForFunction(() => [...document.querySelectorAll('.lib-card__title')].some((e) => e.textContent === 'Переименовано'), null, { timeout: 20000 })
+  check(`${label}: rename changes the title in the list`, (await titles()).includes('Переименовано'))
+
+  // search, on a title we know is there exactly once
+  const search = L.getByRole('searchbox', { name: 'Поиск по названию' })
+  await search.fill('Переименовано')
+  await page.waitForFunction(() => document.querySelectorAll('.lib-card').length === 1, null, { timeout: 20000 }).catch(() => {})
+  check(`${label}: search narrows the list to the one match`, (await titles()).join('') === 'Переименовано', (await titles()).join(' | '))
+  await search.fill('')
+  await page.waitForFunction((n) => document.querySelectorAll('.lib-card').length === n, before + 1, { timeout: 20000 })
+
+  // delete -> trash -> restore
+  const count = (await titles()).length
+  page.once('dialog', (d) => d.accept())
+  await L.locator('.lib-card').first().getByRole('button', { name: 'Удалить' }).click()
+  await page.waitForFunction((n) => document.querySelectorAll('.lib-card').length === n - 1, count, { timeout: 20000 })
+  check(`${label}: delete takes it out of the list`, !(await titles()).includes('Переименовано'))
+  await L.getByRole('tab', { name: /Корзина/ }).click()
+  await L.locator('.lib-row').first().waitFor({ timeout: 20000 })
+  check(`${label}: it is in the trash, not gone`, (await L.locator('.lib-row__title').allTextContents()).includes('Переименовано'))
+  await L.locator('.lib-row').first().getByRole('button', { name: 'Восстановить' }).click()
+  await page.waitForFunction(() => document.querySelectorAll('.lib-row').length === 0, null, { timeout: 20000 })
+  await L.getByRole('tab', { name: /Упражнения/ }).click()
+  await L.locator('.lib-card').first().waitFor({ timeout: 20000 })
+  check(`${label}: restoring brings it back`, (await titles()).includes('Переименовано'), (await titles()).join(' | '))
+
+  // a new exercise clears the table and keeps the old ones in the library
+  const kept = (await titles()).length
+  await L.getByRole('button', { name: 'Новое упражнение' }).click()
+  await L.waitFor({ state: 'detached', timeout: 20000 })
+  check(`${label}: a new exercise clears the table`, (await scene(page)).items.length === 0)
+  await openLibrary()
+  await L.locator('.lib-card').first().waitFor({ timeout: 20000 })
+  check(`${label}: and nothing was lost from the library`, (await titles()).length >= kept, `${(await titles()).length} of ${kept}`)
+
+  // opening one puts it back on the table
+  await L.locator('.lib-card__main').first().click()
+  await L.waitFor({ state: 'detached', timeout: 20000 })
+  check(`${label}: opening from the library puts it back on the table`, (await scene(page)).items.length >= 2, `${(await scene(page)).items.length} objects`)
+
+  await page.evaluate(() => window.__library.getState().createNew())
+  await page.waitForTimeout(200)
+}
+
 async function run(viewport, dsf, label, full) {
   const { ctx, page, errors } = await newPage(viewport, dsf)
   if (full) await behaviour(page, label)
   await picture(page, label)
+  await stage6(page, label)
 
   // clipboard: the button must produce an image/png item
   await page.evaluate(() => window.__store.getState().addBall('white', { x: 1000, y: 1000 }))
@@ -1406,6 +1496,8 @@ if (!ONLY || ONLY === 'phone') {
   await page.waitForTimeout(250)
   check('phone: pyramid from the menu sheet', (await scene(page)).items.filter((i) => i.type === 'ball').length >= 16)
   check('phone: the sheet closes after racking', (await page.locator('.sheet').count()) === 0)
+
+  await stage6(page, 'phone')
 
   const ta = await page.evaluate(() => {
     const c = document.querySelector('canvas')
