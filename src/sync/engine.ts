@@ -110,26 +110,37 @@ async function pull(): Promise<boolean> {
   await noteServerTime(body.now, Date.now() - started)
 
   let changed = false
-  for (const meta of body.items) {
+
+  /** take one exercise from the listing, scene and thumbnail included */
+  const take = async (meta: ExerciseMeta): Promise<boolean> => {
     const local = await readMeta(meta.id)
     // ours to push, not to take: the answer to a local edit is the 409 path
-    if (local?.dirty === 1) continue
-    if (local && local.rev >= meta.rev) continue
-    if (heldByEditor(meta.id)) continue
+    if (local?.dirty === 1) return false
+    if (local && local.rev >= meta.rev) return false
+    if (heldByEditor(meta.id)) return false
 
-    if (meta.deletedAt !== null) {
-      if ((await applyServer(meta, null)) === 'applied') changed = true
-      continue
-    }
+    if (meta.deletedAt !== null) return (await applyServer(meta, null)) === 'applied'
+
     const record = await fetchRecord(meta.id)
-    if (!record) continue
+    if (!record) return false
     const { scene, ...serverMeta } = record
-    if ((await applyServer(serverMeta as ExerciseMeta, scene)) === 'applied') {
-      changed = true
+    const applied = (await applyServer(serverMeta as ExerciseMeta, scene)) === 'applied'
+    if (applied && useLibrary.getState().currentId === meta.id) {
       // the coach is looking at this one; show them what arrived
-      if (useLibrary.getState().currentId === meta.id) await useLibrary.getState().reloadCurrent()
+      await useLibrary.getState().reloadCurrent()
     }
     if (serverMeta.previewAt > 0) await fetchPreview(meta.id, serverMeta.previewAt)
+    return applied
+  }
+
+  // A device meeting the library for the first time fetches every exercise
+  // one by one, and one by one over a hall's wifi is a minute of waiting.
+  // Six at a time, because they are independent - each is its own key - and
+  // because more than that just queues inside the browser anyway.
+  const BATCH = 6
+  for (let i = 0; i < body.items.length; i += BATCH) {
+    const done = await Promise.all(body.items.slice(i, i + BATCH).map(take))
+    if (done.some(Boolean)) changed = true
   }
 
   await saveCursor(body.cursor)
