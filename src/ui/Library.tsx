@@ -262,6 +262,9 @@ export function Library({ onClose }: { onClose: () => void }) {
         <button type="button" className="btn" onClick={() => syncNow()}>
           Синхронизировать сейчас
         </button>
+        <span className="library__build" title="Сборка приложения">
+          сборка {typeof __BUILD__ === 'string' ? __BUILD__ : '—'}
+        </span>
       </footer>
     </div>
   )

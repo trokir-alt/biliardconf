@@ -1118,10 +1118,19 @@ kbd {
 
 .library__foot {
   display: flex;
+  align-items: center;
   gap: 10px;
   padding: 10px 16px;
   border-top: 1px solid var(--panel-edge);
   flex-wrap: wrap;
+}
+
+/* which build is actually running - the answer to "but I deployed that fix" */
+.library__build {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
 }
 
 .library__empty,

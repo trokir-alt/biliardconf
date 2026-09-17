@@ -143,6 +143,7 @@ export async function collectDiagnostics(): Promise<Record<string, unknown>> {
     if (m.deletedAt === null && !(await readScene(m.id))) withoutScene++
   }
   return {
+    build: typeof __BUILD__ === 'string' ? __BUILD__ : 'unknown',
     deviceId: await deviceId().catch(() => 'unknown'),
     cursor: await loadCursor().catch(() => -1),
     clockSkewMs: clockSkew(),

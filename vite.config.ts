@@ -7,6 +7,9 @@ const API_TARGET = process.env.API_TARGET ?? 'http://127.0.0.1:4181'
 const proxy = { '/api': { target: API_TARGET, changeOrigin: false } }
 
 export default defineConfig({
+  // the commit is baked in so any exported file says which build made it;
+  // without that, "I deployed a fix" and "the fix is running" look the same
+  define: { __BUILD__: JSON.stringify((process.env.COMMIT_REF ?? 'dev').slice(0, 7)) },
   plugins: [
     react(),
     /**
@@ -21,6 +24,9 @@ export default defineConfig({
      */
     VitePWA({
       registerType: 'autoUpdate',
+      // src/lib/updates.ts registers the worker and, unlike the script this
+      // plugin injects, actually checks for a new one and reloads
+      injectRegister: false,
       includeAssets: ['brand/icon.svg', 'brand/icon-180.png', 'fonts/*.woff2'],
       manifest: {
         name: 'Упражнения · Алексей Соць',
@@ -40,6 +46,13 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // both are needed for the app to be able to replace itself: skipWaiting
+        // lets the new worker activate without waiting for every tab to close,
+        // clientsClaim lets it take over the page that is already open. Without
+        // the second one the page keeps its old worker and old bundle, and a
+        // device can stay on a stale build indefinitely.
+        skipWaiting: true,
+        clientsClaim: true,
         globPatterns: ['**/*.{js,css,html,woff2,svg,png}'],
         navigateFallback: '/index.html',
         // a navigation to /api/... must reach the function, not the app shell
