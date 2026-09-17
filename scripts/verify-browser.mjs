@@ -484,6 +484,8 @@ async function stage3(page, label) {
   const pw = sc.items.find((i) => i.type === 'power')
   check(`${label}: power plate is placed by a tap at 2,5`, !!pw && pw.value === 2.5)
 
+  await tool(page, 'Выбор')
+
   /* The floating properties panel must never land on a control. It is
      positioned in page coordinates with no positioned ancestor, and when that
      origin was wrong it sat on the toolbar and swallowed the clicks meant for
@@ -503,7 +505,6 @@ async function stage3(page, label) {
   })
   check(`${label}: the properties panel covers no control`, covered.ok, covered.hidden.join(', '))
 
-  await tool(page, 'Выбор')
   const SERIES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
   const inSeries = (v) => SERIES.includes(v)
   // the scale is one column of nine cells, read bottom to top: artboard 100
