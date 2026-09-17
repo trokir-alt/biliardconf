@@ -82,8 +82,10 @@ async function toPage(page, mx, my) {
 
 /** press-drag-release across the table, in mm */
 async function gesture(page, from, to, steps = 18) {
-  const [x0, y0] = await toPage(page, from.x, from.y)
-  const [x1, y1] = await toPage(page, to.x, to.y)
+  const [[x0, y0], [x1, y1]] = await toPageAll(page, [
+    [from.x, from.y],
+    [to.x, to.y],
+  ])
   await page.mouse.move(x0, y0)
   await page.mouse.down()
   await page.mouse.move(x1, y1, { steps })
@@ -393,8 +395,11 @@ async function stage3(page, label) {
   // release point. Mouse events carry whole css pixels, so the point the app
   // saw is the rounded press and release positions, not the fractional ones
   const target = { x: sp.x + 0.5 * r, y: sp.y - 0.3 * r }
-  const [px0, py0] = await toPage(page, sp.x, sp.y)
-  const [px1, py1] = await toPage(page, target.x, target.y)
+  // both points off one layout reading: see toPageAll
+  const [[px0, py0], [px1, py1]] = await toPageAll(page, [
+    [sp.x, sp.y],
+    [target.x, target.y],
+  ])
   const grab = { x: Math.round(px0) - px0, y: Math.round(py0) - py0 } // press offset from the dot centre
   await page.mouse.move(Math.round(px0), Math.round(py0))
   await page.mouse.down()
