@@ -392,11 +392,3 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     noteProblem: (text) => set({ lastProblem: text }),
   }
 })
-
-/** the record the editor has open, for the engine's "do not overwrite" check */
-export function openRecordId(): string | null {
-  return useLibrary.getState().currentId
-}
-
-/** the corrected clock, re-exported so the interface does not import two files */
-export { now as libraryNow }

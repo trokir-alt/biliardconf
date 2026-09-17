@@ -226,14 +226,6 @@ export async function createLocal(scene: Scene, title: string): Promise<LocalMet
   return commitLocal({ id: newExerciseId(now()), scene, title })
 }
 
-/**
- * A second copy of an exercise under its own id: what a conflict leaves
- * behind, and what "duplicate" in the list does.
- */
-export async function forkLocal(scene: Scene, title: string): Promise<LocalMeta> {
-  return createLocal(scene, title)
-}
-
 /** Sets the tombstone. The body stays: the trash is this, and sync needs it. */
 export async function deleteLocal(id: string): Promise<void> {
   const b = await backend()
