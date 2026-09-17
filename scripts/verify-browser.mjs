@@ -416,7 +416,12 @@ async function stage3(page, label) {
   )
   let it = (await scene(page)).items.find((i) => i.id === sp.id)
   const err = Math.hypot(it.dot.u * r - (seen.x - sp.x), it.dot.v * r - (seen.y - sp.y)) / r
-  check(`${label}: dot lands within 2% of the radius of where it was released`, err <= 0.02, `${(err * 100).toFixed(2)}% (u=${it.dot.u.toFixed(3)}, v=${it.dot.v.toFixed(3)})`)
+  const where = await page.evaluate(() => ({ scale: window.__layout.scale, rot: window.__layout.rotation, zoom: window.__view.getState().viewport.zoom }))
+  check(
+    `${label}: dot lands within 2% of the radius of where it was released`,
+    err <= 0.02,
+    `${(err * 100).toFixed(2)}% (u=${it.dot.u.toFixed(3)}, v=${it.dot.v.toFixed(3)}) at ${px0.toFixed(2)},${py0.toFixed(2)} -> ${px1.toFixed(2)},${py1.toFixed(2)} scale ${where.scale.toFixed(4)} rot ${where.rot} zoom ${where.zoom}`,
+  )
   check(`${label}: dragging the dot does not move the ball`, it.x === sp.x && it.y === sp.y)
 
   // dragging the body keeps the dot where it is on the ball

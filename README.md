@@ -128,13 +128,10 @@ npm run build    # tsc -b && vite build -> dist/
 npm run preview
 ```
 
-`scripts/api-server.mjs` поднимает настоящие модули из `netlify/functions`,
-читая их `config.path`, а вместо `@netlify/blobs` подставляет заглушку через
-хук резолвера Node — поэтому ни аккаунта, ни сети для разработки не нужно:
-
-```bash
-node --import ./scripts/blobs-register.mjs scripts/api-server.mjs
-```
+`npm run api` (`scripts/api-server.mjs`) поднимает настоящие модули из
+`netlify/functions`, читая их `config.path`, а вместо `@netlify/blobs`
+подставляет заглушку через хук резолвера Node — поэтому ни аккаунта, ни сети
+для разработки не нужно.
 
 Заглушка отдаёт из `list()` только ключи и etag, как настоящий пакет. Если бы
 она возвращала метаданные, стенд пропустил бы неверную схему обмена.
@@ -222,7 +219,7 @@ Vite 8 требует Node не ниже 20.19 — это записано в `e
 | Объём | Сто упражнений: список открывается за 280 мс |
 
 ```bash
-node --import ./scripts/blobs-register.mjs scripts/api-server.mjs &
+npm run api &
 npm run build && npx vite preview --port 4180 &
 PORT=4180 node scripts/verify-sync.mjs
 ```
