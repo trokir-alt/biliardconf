@@ -21,7 +21,7 @@ import {
 import { flushScene, saveScene } from './lib/storage'
 import { useStore } from './state/store'
 import { registerPreviewSource, useLibrary } from './state/library'
-import { startSync, syncNow } from './sync/engine'
+import { startSync, syncCycles, syncNow } from './sync/engine'
 import { Library } from './ui/Library'
 import { publishDebug } from './lib/debug'
 import { useView } from './state/view'
@@ -54,7 +54,7 @@ export function App() {
     const unsub = useStore.subscribe((s) => {
       if (s.scene !== last) {
         last = s.scene
-        saveScene(s.scene, useLibrary.getState().currentId)
+        saveScene(s.scene)
       }
     })
     const flush = () => flushScene()
@@ -85,6 +85,7 @@ export function App() {
     // ?debug=1 only: the acceptance run drives the library and the engine
     publishDebug('__library', useLibrary)
     publishDebug('__sync', syncNow)
+    publishDebug('__syncCycles', syncCycles)
     let stop: (() => void) | null = null
     void useLibrary
       .getState()

@@ -80,17 +80,32 @@ async function draw(d, title, balls = 2) {
   await d.page.evaluate(() => window.__library.getState().commitNow())
 }
 
-/** push and pull until everything this device holds is on the server */
+/**
+ * Push and pull until everything this device holds is on the server.
+ *
+ * It waits for an exchange that STARTS after this call: a device that is
+ * already 'synced' would otherwise satisfy the condition instantly and the
+ * test would go on to assert things about data that has not arrived yet.
+ */
 async function sync(d, timeout = 20000) {
-  await d.page.evaluate(() => window.__sync())
+  const from = await d.page.evaluate(() => {
+    window.__sync()
+    return window.__syncCycles()
+  })
   await d.page.waitForFunction(
-    () => {
+    (n) => {
       const s = window.__library.getState()
-      return s.sync === 'synced' && s.items.every((m) => m.dirty === 0)
+      return window.__syncCycles() > n && s.sync === 'synced' && s.items.every((m) => m.dirty === 0)
     },
-    null,
+    from,
     { timeout },
   )
+}
+
+/** wait until a record matching the predicate is here, syncing as needed */
+async function waitUntil(d, fnBody, timeout = 30000) {
+  await d.page.evaluate(() => window.__sync())
+  await d.page.waitForFunction(fnBody, null, { timeout })
 }
 
 /** pull only: wait until the named exercise is here */
@@ -179,7 +194,11 @@ async function conflict() {
   const counts = alive.map((m) => m.itemCount).sort((x, y) => x - y)
   check('conflict: neither version lost its objects', counts.join(',') === '5,7', `object counts ${counts.join(',')}`)
 
-  await waitFor(b, 'Дуплет в угол')
+  // B has the title already, so waiting for it would prove nothing: what has
+  // to arrive is the copy A made of B's losing version
+  await waitUntil(b, () =>
+    window.__library.getState().items.some((m) => m.title.startsWith('конфликт: ')),
+  )
   await sync(b, 30000)
   const lb = await lib(b)
   const bAlive = lb.items.filter((m) => m.deletedAt === null)
@@ -276,8 +295,11 @@ async function offline() {
   await a.ctx.setOffline(false)
   await sync(a, 30000)
   const server = await fetch(`${API}/api/exercises?since=0`).then((r) => r.json())
-  check('offline: it goes up when the network returns', server.items.some((m) => m.title === 'Нарисовано без сети'), JSON.stringify(server.items.map((i) => i.title)))
+  const names = server.items.map((i) => i.title)
+  check('offline: it goes up when the network returns', names.includes('Нарисовано без сети'), JSON.stringify(names))
   check('offline: the header says synchronised again', (await lib(a)).sync === 'synced')
+  // reloading between a save and the next change must not clone the exercise
+  check('offline: the reload did not duplicate anything', new Set(names).size === names.length && names.length === 2, JSON.stringify(names))
 
   await a.ctx.close()
 }

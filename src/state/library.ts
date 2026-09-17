@@ -37,7 +37,7 @@ import {
   restoreLocal,
   setLastOpenId,
 } from '../sync/local'
-import { clearDraft, loadDraft, saveScene, stampLegacyMigrated } from '../lib/storage'
+import { clearDraft, loadDraft, setDraftOwner, stampLegacyMigrated } from '../lib/storage'
 
 /** how long after the last change the library takes a revision */
 const COMMIT_MS = 1500
@@ -170,6 +170,9 @@ export const useLibrary = create<LibraryState>()((set, get) => {
       id = meta.id
       at = meta.clientUpdatedAt
       set({ currentId: id })
+      // the crash net now belongs to this record, and must say so before the
+      // tab has any chance to go away
+      setDraftOwner(id)
       await setLastOpenId(id)
     } else {
       const meta = await commitLocal({ id, scene, title: titleOf(scene) })
@@ -196,6 +199,7 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     useStore.getState().replaceScene(rec.scene)
     lastCommitted = JSON.stringify(rec.scene)
     set({ currentId: id, editorDirty: false })
+    setDraftOwner(id)
     await setLastOpenId(id)
   }
 
@@ -233,6 +237,7 @@ export const useLibrary = create<LibraryState>()((set, get) => {
         // the record, because it was written after the last commit
         opened = draft.id
         set({ currentId: opened })
+        setDraftOwner(opened)
         lastCommitted = null
         await commitNow()
       } else if (draft && !draft.id && hasContent(draft.scene)) {
@@ -270,9 +275,10 @@ export const useLibrary = create<LibraryState>()((set, get) => {
       await refresh()
 
       /* from here on the editor drives the library */
+      // the editor's own autosave lives in App; here the library only notes
+      // that a revision is owed
       useStore.subscribe((s, prev) => {
         if (s.scene === prev.scene) return
-        saveScene(s.scene, get().currentId)
         set({ editorDirty: true, sync: get().sync === 'offline' ? 'offline' : 'pending' })
         scheduleCommit()
       })
@@ -314,6 +320,7 @@ export const useLibrary = create<LibraryState>()((set, get) => {
       const meta = await createLocal(scene, title || 'Без названия')
       lastCommitted = JSON.stringify(scene)
       set({ currentId: meta.id, editorDirty: false })
+      setDraftOwner(meta.id)
       await setLastOpenId(meta.id)
       await refresh()
       announce()

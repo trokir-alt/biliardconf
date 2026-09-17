@@ -326,6 +326,8 @@ async function handleGone(id: string): Promise<void> {
 /* ----------------------------------------------------------------- loop */
 
 let running = false
+/** completed exchanges, so a caller can tell a fresh one from a stale state */
+let cycles = 0
 let wakeUp: (() => void) | null = null
 let nextDelay = POLL_MS
 /** a wake asked for while a pass was already running, to be honoured after it */
@@ -365,12 +367,14 @@ async function cycle(): Promise<void> {
     firstConnection = false
     while (more) more = await pull()
     lib.setSync('synced')
+    cycles++
     await lib.refresh()
     // a change made while this pass ran is not made to wait half a minute
     nextDelay = wakeAsked ? POLL_SOON_MS : POLL_MS
   } catch (e) {
     if (!(e instanceof Offline)) throw e
     lib.setSync('offline')
+    cycles++
     nextDelay = Math.min(POLL_BACKOFF_MAX, Math.max(POLL_MS, nextDelay * 2))
   }
 }
@@ -423,6 +427,11 @@ export function startSync(): () => void {
     window.removeEventListener('online', online)
     document.removeEventListener('visibilitychange', visible)
   }
+}
+
+/** how many exchanges have finished; used by the acceptance run to wait */
+export function syncCycles(): number {
+  return cycles
 }
 
 /** the backup file the settings screen offers: everything, from the server */

@@ -221,30 +221,45 @@ export function loadScene(): Scene | null {
 
 let timer: ReturnType<typeof setTimeout> | null = null
 let pending: Scene | null = null
-let pendingOwner: string | null = null
+/** the library record the autosaved scene belongs to, or null for a new one */
+let owner: string | null = null
+
+function stamp(): void {
+  try {
+    window.localStorage.setItem(DRAFT_KEY, JSON.stringify({ id: owner, at: Date.now() }))
+  } catch {
+    // same as the scene below: losing the stamp costs a little, not the work
+  }
+}
 
 function flush(): void {
   timer = null
   if (!pending) return
   try {
     window.localStorage.setItem(KEY, JSON.stringify(pending))
-    window.localStorage.setItem(
-      DRAFT_KEY,
-      JSON.stringify({ id: pendingOwner, at: Date.now() }),
-    )
   } catch {
     // quota or private mode: autosave is a convenience, never a hard failure
   }
+  stamp()
   pending = null
 }
 
 /**
- * @param ownerId the library record this scene is a draft of, or null while
- *   the exercise is new and has no record yet.
+ * Name the record the autosaved scene belongs to, and write it out now.
+ *
+ * Now, and not on the next change: an exercise that is created and then
+ * reloaded before anything else is touched would otherwise leave a draft that
+ * names no record, and the next boot would read it as a library from before
+ * this version and adopt it a second time. That is one duplicate per device,
+ * and it is silent.
  */
-export function saveScene(scene: Scene, ownerId: string | null = null): void {
+export function setDraftOwner(id: string | null): void {
+  owner = id
+  stamp()
+}
+
+export function saveScene(scene: Scene): void {
   pending = scene
-  pendingOwner = ownerId
   if (timer !== null) return
   timer = setTimeout(flush, DEBOUNCE_MS)
 }
@@ -269,6 +284,7 @@ export function loadDraft(): { scene: Scene; id: string | null; at: number } | n
 
 /** the draft has been folded into the library; the crash net starts over */
 export function clearDraft(): void {
+  owner = null
   try {
     window.localStorage.removeItem(DRAFT_KEY)
   } catch {
