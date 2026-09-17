@@ -1230,8 +1230,17 @@ async function stage6(page, label) {
   await openLibrary()
   await L.waitFor({ timeout: 20000 })
   check(`${label}: the library opens`, await L.isVisible())
-  await page.waitForFunction(() => document.querySelectorAll('.lib-card').length >= 1, null, { timeout: 20000 })
-  check(`${label}: the exercise on screen is in the list`, (await titles()).includes('Упражнение для списка'), (await titles()).join(' | '))
+  // wait for the title itself, not merely for a card: the library commits the
+  // open exercise when it mounts, so the row arrives a moment after the screen
+  const listed = await page
+    .waitForFunction(
+      () => [...document.querySelectorAll('.lib-card__title')].some((e) => e.textContent === 'Упражнение для списка'),
+      null,
+      { timeout: 20000 },
+    )
+    .then(() => true)
+    .catch(() => false)
+  check(`${label}: the exercise on screen is in the list`, listed, (await titles()).join(' | '))
   const badge = (await L.locator('.sync').first().innerText()).trim()
   check(`${label}: the list says whether the work reached the server`, ['Синхронизировано', 'Есть несохранённое', 'Нет связи'].includes(badge), badge)
 
@@ -1253,7 +1262,10 @@ async function stage6(page, label) {
   const before = (await titles()).length
   await L.locator('.lib-card').first().getByRole('button', { name: 'Дублировать' }).click()
   await page.waitForFunction((n) => document.querySelectorAll('.lib-card').length === n + 1, before, { timeout: 20000 })
-  check(`${label}: duplicate makes a second exercise`, (await titles()).some((t) => t.includes('(копия)')), (await titles()).join(' | '))
+  // one reading, used for both the verdict and what it prints: a sync landing
+  // between two readings would make the two disagree
+  const afterCopy = await titles()
+  check(`${label}: duplicate makes a second exercise`, afterCopy.some((t) => t.includes('(копия)')), afterCopy.join(' | '))
 
   page.once('dialog', (d) => d.accept('Переименовано'))
   await L.locator('.lib-card').first().getByRole('button', { name: 'Переименовать' }).click()
@@ -1264,7 +1276,8 @@ async function stage6(page, label) {
   const search = L.getByRole('searchbox', { name: 'Поиск по названию' })
   await search.fill('Переименовано')
   await page.waitForFunction(() => document.querySelectorAll('.lib-card').length === 1, null, { timeout: 20000 }).catch(() => {})
-  check(`${label}: search narrows the list to the one match`, (await titles()).join('') === 'Переименовано', (await titles()).join(' | '))
+  const found = await titles()
+  check(`${label}: search narrows the list to the one match`, found.join('') === 'Переименовано', found.join(' | '))
   await search.fill('')
   await page.waitForFunction((n) => document.querySelectorAll('.lib-card').length === n, before + 1, { timeout: 20000 })
 
@@ -1281,7 +1294,8 @@ async function stage6(page, label) {
   await page.waitForFunction(() => document.querySelectorAll('.lib-row').length === 0, null, { timeout: 20000 })
   await L.getByRole('tab', { name: /Упражнения/ }).click()
   await L.locator('.lib-card').first().waitFor({ timeout: 20000 })
-  check(`${label}: restoring brings it back`, (await titles()).includes('Переименовано'), (await titles()).join(' | '))
+  const back = await titles()
+  check(`${label}: restoring brings it back`, back.includes('Переименовано'), back.join(' | '))
 
   // a new exercise clears the table and keeps the old ones in the library
   const kept = (await titles()).length
@@ -1290,12 +1304,14 @@ async function stage6(page, label) {
   check(`${label}: a new exercise clears the table`, (await scene(page)).items.length === 0)
   await openLibrary()
   await L.locator('.lib-card').first().waitFor({ timeout: 20000 })
-  check(`${label}: and nothing was lost from the library`, (await titles()).length >= kept, `${(await titles()).length} of ${kept}`)
+  const still = await titles()
+  check(`${label}: and nothing was lost from the library`, still.length >= kept, `${still.length} of ${kept}`)
 
   // opening one puts it back on the table
   await L.locator('.lib-card__main').first().click()
   await L.waitFor({ state: 'detached', timeout: 20000 })
-  check(`${label}: opening from the library puts it back on the table`, (await scene(page)).items.length >= 2, `${(await scene(page)).items.length} objects`)
+  const opened = (await scene(page)).items.length
+  check(`${label}: opening from the library puts it back on the table`, opened >= 2, `${opened} objects`)
 
   await page.evaluate(() => window.__library.getState().createNew())
   await page.waitForTimeout(200)
