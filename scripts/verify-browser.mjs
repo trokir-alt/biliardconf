@@ -122,6 +122,16 @@ async function gesture(page, from, to, steps = 18) {
     [from.x, from.y],
     [to.x, to.y],
   ])
+  // a drag that starts under the floating panel would grab the panel, not the
+  // table; the coach clears it the same way, by touching the cloth first
+  const blocked = await page.evaluate(
+    ([px, py]) => !!document.elementFromPoint(px, py)?.closest('.props'),
+    [x0, y0],
+  )
+  if (blocked) {
+    await page.evaluate(() => window.__store.getState().select(null))
+    await page.waitForTimeout(80)
+  }
   await page.mouse.move(x0, y0)
   await page.mouse.down()
   await page.mouse.move(x1, y1, { steps })
@@ -133,6 +143,29 @@ async function gesture(page, from, to, steps = 18) {
 }
 
 const tool = (page, name) => page.getByRole('button', { name, exact: true }).click()
+
+/**
+ * Click a point on the canvas, and make sure it IS the canvas.
+ *
+ * The properties panel floats just under whatever is selected, so it can sit
+ * over the next object the test wants to reach - the coach hits the same
+ * thing and clears it by clicking the cloth first. Doing that here keeps the
+ * check about what it is meant to check.
+ */
+async function clickCanvas(page, x, y) {
+  const blocked = await page.evaluate(
+    ([px, py]) => {
+      const el = document.elementFromPoint(px, py)
+      return !!(el && el.closest('.props'))
+    },
+    [x, y],
+  )
+  if (blocked) {
+    await page.evaluate(() => window.__store.getState().select(null))
+    await page.waitForTimeout(80)
+  }
+  await page.mouse.click(x, y)
+}
 
 async function newPage(viewport, dsf, opts = {}) {
   await resetStand()
@@ -305,7 +338,7 @@ async function behaviour(page, label) {
   // ---- arrow handles: bend and end ----
   const arrow = (await scene(page)).items.find((i) => i.type === 'arrow')
   const [ax, ay] = await toPage(page, (arrow.points[0].x + arrow.points.at(-1).x) / 2, (arrow.points[0].y + arrow.points.at(-1).y) / 2)
-  await page.mouse.click(ax, ay)
+  await clickCanvas(page, ax, ay)
   await page.waitForTimeout(150)
   check(`${label}: clicking an arrow selects it`, (await scene(page)).selectedId === arrow.id)
   check(`${label}: properties panel shows`, await page.locator('.props').isVisible())
@@ -520,7 +553,7 @@ async function stage3(page, label) {
   }
   const seg = (i) => cellOf(SERIES[i])
   const [cx7, cy7] = await toPage(page, seg(6).x, seg(6).y)
-  await page.mouse.click(cx7, cy7)
+  await clickCanvas(page, cx7, cy7)
   await page.waitForTimeout(150)
   let pv = (await scene(page)).items.find((i) => i.id === pw.id)
   check(`${label}: tapping a segment sets the value`, pv.value === 3.5, String(pv.value))
