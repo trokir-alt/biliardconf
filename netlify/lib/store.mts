@@ -12,10 +12,19 @@
  *   working, and every listing said the library was empty. Measured on the
  *   live site: PUT 200, readBack ok, list 0, with nine exercises in the store.
  *   So: eventual by default, and STRONG passed to the keyed reads that need it.
- * - **Region.** A site-wide store does NOT inherit the site's function region;
- *   omitting it lands the data wherever the API defaults to, and a store's
- *   data does not move if the value changes later. The app is Russian, so
- *   Frankfurt, chosen once.
+ * - **Region, and why it is NOT changed.** Every call here goes to
+ *   `/region:eu-central-1/...`. The site's own blobs region, which the deploy
+ *   record reports, is us-east-2 - a different one. Reads and writes by key
+ *   are consistent with each other and work perfectly well that way, which is
+ *   why nothing looked wrong; a listing does not, and answers "empty" instead
+ *   (/api/health measures exactly this, in `listsOwnWrite`). That is the best
+ *   account of why every listing on the live site saw nothing.
+ *
+ *   The value stays as it is all the same. The exercises written so far are
+ *   under this path, a store's data does not move when the value changes, and
+ *   pointing the code somewhere else would make them unreachable by key -
+ *   which is the one thing that has always worked. Nothing depends on a
+ *   listing now, so a mismatched region costs nothing.
  * - **Scope.** Production uses the site-wide store; anything else uses the
  *   deploy-scoped one, so a deploy preview or a test run can never write into
  *   the coach's library.

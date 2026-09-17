@@ -20,8 +20,9 @@
  */
 
 import type { Config, Context } from '@netlify/functions'
+import { getStore } from '@netlify/blobs'
 import { catalogItems } from '../lib/catalog.mts'
-import { STRONG, json, now, openStore, storeScope } from '../lib/store.mts'
+import { STORE_NAME, STRONG, json, now, openStore, storeScope } from '../lib/store.mts'
 
 const say = (e: unknown) => String(e instanceof Error ? e.message : e)
 
@@ -103,6 +104,44 @@ export default async (_req: Request, _context: Context) => {
         : `stale=${stale.modified} fresh=${fresh.modified} value=${String(after?.at)}`
   } catch (e) {
     out.cas = say(e)
+  }
+
+  /**
+   * Can a store find, by listing, a key it has just written itself?
+   *
+   * This is the experiment that settles what went wrong, and it is here
+   * because it could not be run from the outside. The store this app opens is
+   * pinned to a region. The site's own blobs region, which the deploy record
+   * reports, is a DIFFERENT one - so every read and write has been going to
+   * `/region:<ours>/...` while the site's store lives elsewhere. Reads and
+   * writes by key are consistent with each other and work; a listing appears
+   * to be answered per site rather than per that path, finds nothing, and the
+   * client turns the 404 into an empty result with no error.
+   *
+   * So both are measured: the pinned store lists its own probe, and a store
+   * opened with no region at all lists its own. If the pinned one finds
+   * nothing and the plain one finds its key, the region is the answer, and it
+   * is measured rather than argued about.
+   *
+   * Nothing depends on the outcome any more - the catalogue is read by key -
+   * but the next person to wonder should not have to spend a day on it.
+   */
+  try {
+    const { blobs } = await store.list({ prefix: 'health/' })
+    out.listsOwnWrite = blobs.some((b) => b.key === probe) ? 'ok' : `no (${blobs.length} rows)`
+  } catch (e) {
+    out.listsOwnWrite = say(e)
+  }
+
+  try {
+    const plain = getStore({ name: STORE_NAME })
+    const key = `health/noregion-${now()}`
+    await plain.setJSON(key, { at: now() })
+    const { blobs } = await plain.list({ prefix: 'health/' })
+    out.listsOwnWriteWithoutRegion = blobs.some((b) => b.key === key) ? 'ok' : `no (${blobs.length} rows)`
+    await plain.delete(key)
+  } catch (e) {
+    out.listsOwnWriteWithoutRegion = say(e)
   }
 
   try {
