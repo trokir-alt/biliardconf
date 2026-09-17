@@ -67,6 +67,9 @@ export function openStore() {
   return isPreview ? getDeployStore(options) : getStore(options)
 }
 
+/** the store as every caller here sees it */
+export type BlobStore = ReturnType<typeof openStore>
+
 /**
  * Which store this runtime would open, in plain words.
  *

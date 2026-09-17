@@ -122,6 +122,22 @@ export type ConflictResponse = {
 
 export type GoneResponse = { error: 'gone'; id: string; sweptAt: number }
 
+/**
+ * What POST /api/exercises sends: the ids this device believes the server
+ * already holds.
+ *
+ * It is how the catalogue heals. An exercise written before the catalogue
+ * existed - or one dropped from it by a write that failed halfway - is still
+ * in the store under its own key, but nothing enumerates it. The device that
+ * has it cached knows its id, so it offers the id and the server folds the
+ * record back into the catalogue with a keyed read. Nothing is created from
+ * this: an id with no body behind it is ignored.
+ */
+export type HealBody = { ids: string[] }
+
+/** the catalogue blob: the whole library's metadata, in one keyed read */
+export type Catalog = { version: 1; updatedAt: number; items: ExerciseMeta[] }
+
 /* ------------------------------------------------------------- the rules */
 
 /** a body larger than this is refused outright, with a readable error */
@@ -173,6 +189,20 @@ export function beforeRestoreTitle(title: string, at: number): string {
 export const KEY = {
   exercise: (id: string) => `exercises/${id}`,
   preview: (id: string) => `previews/${id}`,
+  /**
+   * The catalogue: every exercise's metadata in ONE blob, read by key.
+   *
+   * The change feed used to be built by listing the `changed/` keys. On the
+   * live site that listing answered "empty" for a store that demonstrably held
+   * the exercises - writes returned 200, keyed reads returned the bodies, and
+   * every listing said there was nothing there. A feed that depends on a call
+   * which can silently answer "nothing" cannot be trusted with the coach's
+   * library, so the feed is a keyed read now: the one kind of call the live
+   * site has been shown to answer correctly.
+   */
+  catalog: 'catalog',
+  /** which days have a snapshot - a listing of `snapshots/` by another name */
+  days: 'snapshot-days',
   /**
    * The change feed. The key carries the server time, so a listing can answer
    * "what changed since" from the KEYS ALONE - no metadata read per record.

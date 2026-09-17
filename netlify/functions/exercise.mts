@@ -25,6 +25,7 @@ import {
   type ExerciseRecord,
   type PutBody,
 } from '../../src/sync/wire.ts'
+import { CatalogBusy, catalogPut } from '../lib/catalog.mts'
 import { STRONG, fail, json, now, openStore } from '../lib/store.mts'
 
 type Store = ReturnType<typeof openStore>
@@ -32,16 +33,29 @@ type Store = ReturnType<typeof openStore>
 /** the metadata a blob carries, small enough to read without the body */
 type BlobMeta = { rev: number; updatedAt: number; deletedAt: number | null; changedKey: string }
 
-/** writes the record, moves its marker, and answers with the new metadata */
+/**
+ * Writes the record, then puts it in the catalogue.
+ *
+ * The order is the rule: the body first, the catalogue after. A catalogue row
+ * pointing at a body that is not there yet would be read by the other device
+ * as a 404 and taken for a deletion; a body nothing points at is merely
+ * invisible for a moment, and the next write or the next heal finds it.
+ *
+ * The `changed/` marker is still written. Nothing reads it - the catalogue
+ * answers the feed now - but it is a second, independent record of what the
+ * store holds, written by a different call, and /api/health compares the two.
+ * That comparison is what would have caught this bug in an hour instead of a
+ * day.
+ */
 async function commit(store: Store, id: string, meta: ExerciseMeta, scene: unknown, prev: string | null) {
   const changedKey = KEY.changed(meta.updatedAt, id)
   const record: ExerciseRecord = { ...meta, scene: scene as ExerciseRecord['scene'] }
   const blobMeta: BlobMeta = { rev: meta.rev, updatedAt: meta.updatedAt, deletedAt: meta.deletedAt, changedKey }
   await store.setJSON(KEY.exercise(id), record, { metadata: blobMeta })
-  // the marker's body IS the metadata, so a listing never touches the record
   await store.setJSON(changedKey, meta)
   // the old marker would otherwise answer a later ?since= with a stale rev
   if (prev && prev !== changedKey) await store.delete(prev)
+  await catalogPut(store, meta)
   return meta
 }
 
@@ -83,7 +97,12 @@ export default async (req: Request, context: Context) => {
     if (body.baseRev !== 0) return fail(410, 'gone', { id, sweptAt: 0 })
     if (req.method === 'DELETE') return fail(404, 'not-found')
   } else if (body.baseRev !== curMeta!.rev) {
-    return json({ error: 'conflict', server: metaOf(cur.data as ExerciseRecord), now: now() }, 409)
+    const server = metaOf(cur.data as ExerciseRecord)
+    // a conflict is the one moment we know a revision exists and can check
+    // that the catalogue knows it too - it is a no-op read when it does, and
+    // it closes the gap left by a write whose catalogue pass was refused
+    await catalogPut(store, server).catch(() => {})
+    return json({ error: 'conflict', server, now: now() }, 409)
   }
 
   const at = Math.max(now(), (curMeta?.updatedAt ?? 0) + 1)
@@ -111,7 +130,21 @@ export default async (req: Request, context: Context) => {
   const scene = req.method === 'DELETE' ? (cur?.data as ExerciseRecord)?.scene : put.scene
   if (req.method === 'PUT' && (!scene || typeof scene !== 'object')) return fail(400, 'bad-scene')
 
-  await commit(store, id, meta, scene, curMeta?.changedKey ?? null)
+  try {
+    await commit(store, id, meta, scene, curMeta?.changedKey ?? null)
+  } catch (e) {
+    if (!(e instanceof CatalogBusy)) throw e
+    /**
+     * The body is written and readable by key; only the catalogue refused to
+     * take the row, which happens when another writer held it through every
+     * retry. Answering 200 here would be the old mistake in a new place: the
+     * device would call itself synced while the other device could not see the
+     * exercise. So this fails out loud. The client re-sends, gets a 409
+     * against its own writeId, recognises the answer it never received, and
+     * the catalogue takes the row on that pass.
+     */
+    return fail(503, 'catalog-busy', { id, rev: meta.rev })
+  }
   return json({ meta, now: now() })
 }
 

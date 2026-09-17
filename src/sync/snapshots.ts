@@ -157,6 +157,11 @@ export async function collectDiagnostics(): Promise<Record<string, unknown>> {
       withoutScene,
     },
     recentCalls: syncTrace(),
+    // what the SERVER says about itself: which store it opened, how many rows
+    // its catalogue holds, and whether its own listing agrees. Last time this
+    // had to be asked for by hand, over three exchanges; it belongs in the
+    // file the coach can simply send.
+    server: await api<Record<string, unknown>>('/api/health').catch((e) => ({ failed: String(e) })),
   }
 }
 

@@ -38,6 +38,7 @@ import {
   forgetLocal,
   getPreview,
   isOwnWrite,
+  listMeta,
   loadCursor,
   markSent,
   noteServerTime,
@@ -173,6 +174,47 @@ let reconciled = false
  */
 const CURSOR_OVERLAP_MS = 5 * 60_000
 
+/**
+ * The ids this device believes the server already has.
+ *
+ * They are offered on the first exchange of every run, and they are how the
+ * server's catalogue repairs itself. The catalogue is one blob listing every
+ * exercise; the exercises themselves are separate keys and are never at risk,
+ * but the knowledge that a key exists can be lost - by a write whose catalogue
+ * pass was refused, or, as happened, by an entire generation of records written
+ * before the catalogue existed. Nothing on the server can enumerate those. This
+ * device can: it has them cached, with the revisions it received. So it says so.
+ */
+async function syncedIds(): Promise<string[]> {
+  return (await listMeta()).filter((m) => m.rev > 0).map((m) => m.id)
+}
+
+/**
+ * Ask for the change feed, offering this device's ids on the first exchange.
+ *
+ * The offer rides along with the exchange that had to happen anyway, so the
+ * repair costs no extra round trip. It is a repair and not the exchange
+ * itself, though: if the POST is refused for any reason - a deploy that has
+ * not swapped over yet, something in front of the site that passes only GET -
+ * the ordinary listing still has to happen, or a device could be left syncing
+ * nothing because a repair it did not need was unavailable.
+ */
+async function listing(since: number): Promise<Response> {
+  const plain = () => call(`/api/exercises?since=${since}`)
+  if (reconciled) return plain()
+  try {
+    const res = await call(`/api/exercises?since=${since}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ids: await syncedIds() }),
+    })
+    if (res.ok) return res
+  } catch (e) {
+    if (!(e instanceof Offline)) throw e
+  }
+  return plain()
+}
+
 async function pull(): Promise<boolean> {
   const stored = await loadCursor()
   if (stored > 0) firstConnection = false
@@ -180,7 +222,7 @@ async function pull(): Promise<boolean> {
   // hole swallowed comes back, so the library heals itself on the next visit
   const since = reconciled ? Math.max(0, stored - CURSOR_OVERLAP_MS) : 0
   const started = Date.now()
-  const res = await call(`/api/exercises?since=${since}`)
+  const res = await listing(since)
   if (!res.ok) throw new Offline(`list ${res.status}`)
   const body = await readJson<ListResponse>(res)
   await noteServerTime(body.now, Date.now() - started)

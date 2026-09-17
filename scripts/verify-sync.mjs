@@ -37,6 +37,12 @@ const resetServer = () => post('/__test/reset')
 const runDaily = () => post('/__test/daily')
 /** make a key invisible to list(), the way a lagging listing does on Netlify */
 const hideFromList = (key) => post(`/__test/hide?key=${encodeURIComponent(key)}`)
+/** make every list() answer "empty", the way the live site did */
+const blindList = () => post('/__test/blind')
+/** remove one key, to reproduce a store whose catalogue was lost */
+const dropKey = (key) => post(`/__test/drop?key=${encodeURIComponent(key)}`)
+/** refuse every conditional write, as a platform without if-match would */
+const noConditionalWrites = () => post('/__test/no-cas')
 const showAll = () => post('/__test/show')
 
 /* ------------------------------------------------------------- a device */
@@ -536,17 +542,22 @@ async function volume() {
   await a.ctx.close()
 }
 
-/* ------------------------------ 9. a marker that shows up late in a listing */
+/* -------------------------- 9. a listing that lags, and one that lies */
 
 /**
- * The failure that no in-memory stand can produce by itself.
+ * A marker that shows up late in a listing.
  *
  * Netlify Blobs answers list() with eventual consistency: a marker can take up
- * to a minute to appear even when reading the blob is strongly consistent. A
- * cursor that only ever moves forward then has a hole - it advances past the
- * late marker's timestamp, and when the marker finally appears it is already
- * older than the cursor and is skipped for good. The exercise is on the
- * server, and neither device ever shows it.
+ * to a minute to appear even when reading the blob itself is strongly
+ * consistent. The change feed used to be built from that listing, so a cursor
+ * that only moved forward had a hole in it - it advanced past the late
+ * marker's timestamp, and when the marker finally appeared it was already
+ * older than the cursor and was skipped for good.
+ *
+ * The feed is a keyed read of the catalogue now, so a lagging listing cannot
+ * hide anything from it. This scenario therefore asserts the opposite of what
+ * it once did: the marker is invisible to list() throughout, and the exercise
+ * still arrives, immediately.
  */
 async function lateMarker() {
   await resetServer()
@@ -557,33 +568,158 @@ async function lateMarker() {
   await sync(a)
   const id = (await lib(a)).items[0].id
 
-  // A's marker is still propagating as far as B can tell
+  // as far as any listing is concerned, A's marker is still propagating
   await hideFromList(id)
 
   await draw(b, 'Написано вторым')
-  // the first exchange pulls BEFORE it pushes, so B's own marker is not in
-  // that listing yet; it takes a second round for B's cursor to move past the
-  // hidden one, and that is exactly when the hole opens
   await sync(b)
-  await sync(b)
-  const hidden = (await lib(b)).items.map((m) => m.title)
-  check('late marker: the second device does not see it while it propagates', !hidden.includes('Написано первым'), JSON.stringify(hidden))
+  const seen = (await lib(b)).items.map((m) => m.title)
+  check('lagging listing: the exercise arrives all the same', seen.includes('Написано первым'), JSON.stringify(seen))
 
-  // and now it lands - after B's cursor has already moved past it
+  await sync(a)
+  const back = (await lib(a)).items.map((m) => m.title)
+  check('lagging listing: nothing of the second device was lost', back.includes('Написано вторым'), JSON.stringify(back))
+
   await showAll()
-  await sync(b, 30000)
-  let seen = (await lib(b)).items.map((m) => m.title)
-  if (!seen.includes('Написано первым')) {
-    // the cursor overlap covers the documented propagation window; a full
-    // reconcile on the next app start is the backstop, so try that too
-    await b.page.reload({ waitUntil: 'load' })
-    await b.page.waitForFunction(() => window.__library?.getState().ready === true, null, { timeout: 20000 })
-    await sync(b, 30000)
-    seen = (await lib(b)).items.map((m) => m.title)
-  }
-  check('late marker: it arrives once the listing catches up', seen.includes('Написано первым'), JSON.stringify(seen))
-  check('late marker: nothing of the second device was lost', seen.includes('Написано вторым'), JSON.stringify(seen))
+  await a.ctx.close()
+  await b.ctx.close()
+}
 
+/**
+ * A listing that lies: answers "nothing here" for a store holding everything.
+ *
+ * This is what the live site did. Writes returned 200, keyed reads returned
+ * the bodies, the probe key that /api/health writes and reads back worked -
+ * and every listing, of every prefix, reported an empty store. The coach saved
+ * on the phone and on the computer and neither device ever saw the other's
+ * work; the export handed back a file with zero records; the nightly snapshot
+ * would have photographed nothing.
+ *
+ * So: list() answers empty for everything, from the first request, and the
+ * whole product is required to work anyway. Nothing that enumerates may ask
+ * it.
+ */
+async function blindListing() {
+  await resetServer()
+  await blindList()
+  const a = await device('A')
+  const b = await device('B')
+
+  await draw(a, 'Слепой список: с компьютера')
+  await sync(a)
+  await waitFor(b, 'Слепой список: с компьютера', 30000)
+  check('blind listing: the second device sees what the first saved', true)
+
+  await draw(b, 'Слепой список: с телефона')
+  await sync(b)
+  await waitFor(a, 'Слепой список: с телефона', 30000)
+  check('blind listing: and the first sees what the second saved', true)
+
+  const feed = await fetch(`${API}/api/exercises?since=0`).then((r) => r.json())
+  check('blind listing: the feed answers with both', feed.items.filter((m) => m.deletedAt === null).length === 2, `${feed.items.length} rows`)
+
+  const backup = await fetch(`${API}/api/backup`).then((r) => r.json())
+  check('blind listing: the export is not empty', backup.count === 2 && backup.records.length === 2, `count ${backup.count}, ${backup.records.length} records`)
+
+  await runDaily()
+  const days = await fetch(`${API}/api/snapshots`).then((r) => r.json())
+  const body = days.days?.length ? await fetch(`${API}/api/snapshots/${days.days[0]}`).then((r) => r.json()) : { records: [] }
+  check('blind listing: the nightly snapshot photographs the library', body.records.length === 2, `${body.records.length} records in ${JSON.stringify(days.days)}`)
+
+  await showAll()
+  await a.ctx.close()
+  await b.ctx.close()
+}
+
+/**
+ * The state the live site was actually left in: every exercise present under
+ * its own key, and nothing on the server that can enumerate them.
+ *
+ * A device that was never there - a phone opened in a private window - has no
+ * ids to offer and must see an empty library, because from the server's side
+ * that is all there is to know. The device that holds the exercises knows
+ * their ids, offers them on its first exchange, and the catalogue is rebuilt
+ * from the bodies that were there all along. Then the phone sees them.
+ *
+ * Nothing is created from an offered id: an id with no body behind it is
+ * ignored, so this door cannot resurrect a swept exercise or invent one.
+ */
+async function lostCatalogue() {
+  await resetServer()
+  const a = await device('A')
+
+  await draw(a, 'Было на сервере раньше')
+  await draw(a, 'И это тоже')
+  await sync(a)
+  const ids = (await lib(a)).items.map((m) => m.id)
+
+  // the catalogue is gone; the exercises are not
+  await dropKey('catalog')
+  const empty = await fetch(`${API}/api/exercises?since=0`).then((r) => r.json())
+  check('lost catalogue: the server now enumerates nothing', empty.items.length === 0, `${empty.items.length} rows`)
+  const stillThere = await fetch(`${API}/api/exercises/${ids[0]}`).then((r) => r.status)
+  check('lost catalogue: the exercise itself is still readable by key', stillThere === 200, `status ${stillThere}`)
+
+  // a device that has never seen the library cannot heal it and must not pretend
+  const fresh = await device('C')
+  await sync(fresh)
+  check('lost catalogue: a new device sees nothing, and says so honestly', (await lib(fresh)).items.length === 0)
+
+  // the device that HAS them offers its ids on its first exchange after a start
+  await a.page.reload({ waitUntil: 'load' })
+  await a.page.waitForFunction(() => window.__library?.getState().ready === true, null, { timeout: 20000 })
+  await sync(a, 30000)
+  const healed = await fetch(`${API}/api/exercises?since=0`).then((r) => r.json())
+  check('lost catalogue: the device that holds them puts them back', healed.items.length === 2, `${healed.items.length} rows`)
+
+  await waitFor(fresh, 'Было на сервере раньше', 30000)
+  const onFresh = (await lib(fresh)).items.map((m) => m.title)
+  check('lost catalogue: and the new device finally receives the library', onFresh.includes('И это тоже'), JSON.stringify(onFresh))
+
+  // an id nobody has a body for is not a way to invent an exercise
+  const invented = await fetch(`${API}/api/exercises?since=0`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ids: ['ex-zzzzzz-0123456789ab'] }),
+  }).then((r) => r.json())
+  check('lost catalogue: an offered id with no body behind it is ignored', invented.items.length === 2 && invented.restored === 0, `${invented.items.length} rows, restored ${invented.restored}`)
+
+  await a.ctx.close()
+  await fresh.ctx.close()
+}
+
+/**
+ * A platform that does not honour conditional writes.
+ *
+ * The catalogue is one blob two devices write, and it is kept safe by a
+ * compare-and-swap against the ETag. Whether the live platform honours
+ * `if-match` is now measured by /api/health rather than assumed - but the
+ * measurement is no use if the answer "no" means the coach cannot save.
+ *
+ * So: every conditional write is refused, and saving must still work. The
+ * protection given up is the one the heal path restores anyway.
+ */
+async function withoutConditionalWrites() {
+  await resetServer()
+  await noConditionalWrites()
+  const a = await device('A')
+  const b = await device('B')
+
+  await draw(a, 'Без условной записи')
+  await sync(a, 30000)
+  const onServer = await fetch(`${API}/api/exercises?since=0`).then((r) => r.json())
+  check('no conditional writes: the exercise still reaches the server', onServer.items.length === 1, `${onServer.items.length} rows`)
+
+  await waitFor(b, 'Без условной записи', 30000)
+  check('no conditional writes: and the other device still receives it', true)
+
+  await draw(b, 'И второе тоже')
+  await sync(b, 30000)
+  await waitFor(a, 'И второе тоже', 30000)
+  const both = (await lib(a)).items.filter((m) => m.deletedAt === null).map((m) => m.title)
+  check('no conditional writes: neither exercise was lost', both.length === 2, JSON.stringify(both))
+
+  await showAll()
   await a.ctx.close()
   await b.ctx.close()
 }
@@ -599,6 +735,9 @@ await snapshots()
 await serverDown()
 await lostAnswer()
 await lateMarker()
+await blindListing()
+await lostCatalogue()
+await withoutConditionalWrites()
 await volume()
 
 await browser.close()

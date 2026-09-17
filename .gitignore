@@ -28,3 +28,7 @@ dist-ssr
 
 # Netlify local state (Blobs sandbox, function bundles) - never user code
 .netlify
+
+# Screenshots the acceptance runs leave behind
+verify-*.png
+verify-*.jpg

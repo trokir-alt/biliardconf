@@ -11,8 +11,11 @@
  *
  * A few endpoints exist only here and never ship: /__test/reset empties the
  * store between scenarios, /__test/daily runs the scheduled job on demand
- * instead of waiting for 03:17, and /__test/hide makes a key invisible to
- * list() so a run can reproduce a listing that lags behind its writes.
+ * instead of waiting for 03:17, /__test/hide makes a key invisible to list()
+ * so a run can reproduce a listing that lags behind its writes, /__test/blind
+ * makes list() answer "empty" for everything the way the live site did, and
+ * /__test/drop removes one key so a run can reproduce a store whose records
+ * are all there and whose catalogue is not.
  */
 
 import { createServer } from 'node:http'
@@ -77,6 +80,9 @@ const server = createServer((req, res) => {
       const blobs = await import('./blobs-fake.mjs')
       if (url.pathname === '/__test/reset') blobs.__reset()
       else if (url.pathname === '/__test/hide') blobs.__hideFromList(url.searchParams.get('key') ?? '')
+      else if (url.pathname === '/__test/blind') blobs.__blindList(url.searchParams.get('off') !== '1')
+      else if (url.pathname === '/__test/drop') blobs.__drop(url.searchParams.get('key') ?? '')
+      else if (url.pathname === '/__test/no-cas') blobs.__refuseConditional(url.searchParams.get('off') !== '1')
       else if (url.pathname === '/__test/show') blobs.__showAll()
       else if (url.pathname === '/__test/daily') await daily?.()
       else if (url.pathname === '/__test/dump') {
