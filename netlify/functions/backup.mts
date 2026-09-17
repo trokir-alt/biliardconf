@@ -8,14 +8,14 @@
 
 import type { Config, Context } from '@netlify/functions'
 import { KEY, parseChangedKey, type ExerciseRecord } from '../../src/sync/wire.ts'
-import { json, now, openStore } from '../lib/store.mts'
+import { STRONG, json, now, openStore } from '../lib/store.mts'
 
 export default async (_req: Request, _context: Context) => {
   const store = openStore()
   const { blobs } = await store.list({ prefix: 'changed/' })
   const ids = [...new Set(blobs.map((b) => parseChangedKey(b.key)?.id).filter((v): v is string => !!v))]
   const records = (
-    await Promise.all(ids.map((id) => store.get(KEY.exercise(id), { type: 'json' })))
+    await Promise.all(ids.map((id) => store.get(KEY.exercise(id), { type: 'json', ...STRONG })))
   ).filter((r): r is ExerciseRecord => !!r)
   return json({ exportedAt: now(), count: ids.length, records })
 }

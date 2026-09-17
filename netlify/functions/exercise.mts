@@ -25,7 +25,7 @@ import {
   type ExerciseRecord,
   type PutBody,
 } from '../../src/sync/wire.ts'
-import { fail, json, now, openStore } from '../lib/store.mts'
+import { STRONG, fail, json, now, openStore } from '../lib/store.mts'
 
 type Store = ReturnType<typeof openStore>
 
@@ -52,7 +52,7 @@ export default async (req: Request, context: Context) => {
   const key = KEY.exercise(id)
 
   if (req.method === 'GET') {
-    const hit = await store.getWithMetadata(key, { type: 'json' })
+    const hit = await store.getWithMetadata(key, { type: 'json', ...STRONG })
     if (!hit) return fail(404, 'not-found')
     return json({ record: hit.data, now: now() })
   }
@@ -71,12 +71,14 @@ export default async (req: Request, context: Context) => {
     return fail(400, 'bad-body')
   }
 
-  const cur = await store.getWithMetadata(key, { type: 'json' })
+  // the rev this write is checked against: a stale read here would accept a
+  // write based on a revision the server has already moved past
+  const cur = await store.getWithMetadata(key, { type: 'json', ...STRONG })
   const curMeta = (cur?.metadata ?? null) as BlobMeta | null
 
   if (!cur) {
     // a body that is gone for good must never come back through a stale device
-    const grave = await store.getMetadata(KEY.grave(id))
+    const grave = await store.getMetadata(KEY.grave(id), STRONG)
     if (grave) return fail(410, 'gone', { id, sweptAt: (grave.metadata as { sweptAt?: number })?.sweptAt ?? 0 })
     if (body.baseRev !== 0) return fail(410, 'gone', { id, sweptAt: 0 })
     if (req.method === 'DELETE') return fail(404, 'not-found')

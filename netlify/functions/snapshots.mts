@@ -8,7 +8,7 @@
 
 import type { Config, Context } from '@netlify/functions'
 import { KEY } from '../../src/sync/wire.ts'
-import { fail, json, openStore } from '../lib/store.mts'
+import { STRONG, fail, json, openStore } from '../lib/store.mts'
 
 export default async (req: Request, context: Context) => {
   if (req.method !== 'GET') return fail(405, 'method')
@@ -21,7 +21,7 @@ export default async (req: Request, context: Context) => {
     return json({ days })
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return fail(400, 'bad-day')
-  const snap = await store.get(KEY.snapshot(day), { type: 'json' })
+  const snap = await store.get(KEY.snapshot(day), { type: 'json', ...STRONG })
   if (!snap) return fail(404, 'not-found')
   return json(snap)
 }

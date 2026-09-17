@@ -13,7 +13,7 @@
  */
 
 import type { Config, Context } from '@netlify/functions'
-import { json, now, openStore, storeScope } from '../lib/store.mts'
+import { STRONG, json, now, openStore, storeScope } from '../lib/store.mts'
 
 export default async (_req: Request, _context: Context) => {
   const scope = storeScope()
@@ -29,11 +29,28 @@ export default async (_req: Request, _context: Context) => {
   }
   out.open = 'ok'
 
+  // the listing is the thing that was lying: it answered "empty" for a store
+  // with nine exercises in it, because a store-level strong consistency sends
+  // listings to an endpoint that does not serve them and returns 404, which
+  // this client reports as an empty result. Both prefixes, so the answer is
+  // not open to interpretation.
+  for (const [label, prefix] of [
+    ['changed', 'changed/'],
+    ['exercises', 'exercises/'],
+  ] as const) {
+    try {
+      const { blobs } = await store.list({ prefix })
+      out[`list_${label}`] = blobs.length
+    } catch (e) {
+      out[`list_${label}`] = String(e instanceof Error ? e.message : e)
+    }
+  }
+
   try {
-    const { blobs } = await store.list({ prefix: 'changed/' })
-    out.list = blobs.length
+    const { blobs } = await store.list()
+    out.listEverything = blobs.length
   } catch (e) {
-    out.list = String(e instanceof Error ? e.message : e)
+    out.listEverything = String(e instanceof Error ? e.message : e)
   }
 
   try {
@@ -44,7 +61,7 @@ export default async (_req: Request, _context: Context) => {
   }
 
   try {
-    const back = await store.get(probe, { type: 'json' })
+    const back = await store.get(probe, { type: 'json', ...STRONG })
     out.readBack = back ? 'ok' : 'missing'
   } catch (e) {
     out.readBack = String(e instanceof Error ? e.message : e)

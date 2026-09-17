@@ -14,7 +14,7 @@
 
 import type { Config } from '@netlify/functions'
 import { KEY, SNAPSHOT_KEEP, TOMBSTONE_DAYS, dayKey, parseChangedKey, type ExerciseRecord } from '../../src/sync/wire.ts'
-import { openStore } from '../lib/store.mts'
+import { STRONG, openStore } from '../lib/store.mts'
 
 export default async () => {
   const store = openStore()
@@ -23,7 +23,7 @@ export default async () => {
   const { blobs } = await store.list({ prefix: 'changed/' })
   const ids = [...new Set(blobs.map((b) => parseChangedKey(b.key)?.id).filter((v): v is string => !!v))]
   const records = (
-    await Promise.all(ids.map((id) => store.get(KEY.exercise(id), { type: 'json' })))
+    await Promise.all(ids.map((id) => store.get(KEY.exercise(id), { type: 'json', ...STRONG })))
   ).filter((r): r is ExerciseRecord => !!r)
 
   const day = dayKey(at)

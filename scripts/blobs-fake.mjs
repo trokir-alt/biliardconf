@@ -34,9 +34,23 @@ class FakeStore {
   constructor(name) {
     this.name = name
     this.data = new Map()
+    /** the consistency the store was OPENED with, which list() cares about */
+    this.storeConsistency = undefined
   }
 
+  /**
+   * List, including the platform's sharpest edge.
+   *
+   * A store opened with `consistency: 'strong'` sends listings to the uncached
+   * edge endpoint, which does not serve listings: it answers 404, and the real
+   * client turns a 404 into an EMPTY RESULT with no error. Writes and keyed
+   * reads keep working, so everything looks healthy while every listing claims
+   * the store is empty. That cost a day of the coach's time, so the fake does
+   * it too - reintroduce store-level strong consistency and the two-device
+   * check fails here instead of in production.
+   */
   async list({ prefix = '' } = {}) {
+    if (this.storeConsistency === 'strong') return { blobs: [], directories: [] }
     const blobs = []
     for (const [key, row] of this.data) {
       if (!key.startsWith(prefix)) continue
@@ -90,7 +104,9 @@ class FakeStore {
 function pick(options = {}) {
   const name = typeof options === 'string' ? options : (options.name ?? 'default')
   if (!stores.has(name)) stores.set(name, new FakeStore(name))
-  return stores.get(name)
+  const store = stores.get(name)
+  store.storeConsistency = typeof options === 'string' ? undefined : options.consistency
+  return store
 }
 
 export function getStore(options) {

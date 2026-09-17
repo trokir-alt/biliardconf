@@ -14,7 +14,7 @@
 
 import type { Config, Context } from '@netlify/functions'
 import { LIST_PAGE, parseChangedKey, type ExerciseMeta } from '../../src/sync/wire.ts'
-import { json, now, openStore } from '../lib/store.mts'
+import { STRONG, json, now, openStore } from '../lib/store.mts'
 
 export default async (req: Request, _context: Context) => {
   if (req.method !== 'GET') return json({ error: 'method' }, 405)
@@ -28,7 +28,9 @@ export default async (req: Request, _context: Context) => {
     .sort((a, b) => a.at.updatedAt - b.at.updatedAt)
 
   const page = fresh.slice(0, LIST_PAGE)
-  const items = (await Promise.all(page.map((b) => store.get(b.key, { type: 'json' })))).filter(
+  // keyed reads, so strong costs nothing and a marker written a moment ago
+  // is never missed
+  const items = (await Promise.all(page.map((b) => store.get(b.key, { type: 'json', ...STRONG })))).filter(
     (m): m is ExerciseMeta => !!m && typeof m === 'object' && typeof (m as ExerciseMeta).id === 'string',
   )
 

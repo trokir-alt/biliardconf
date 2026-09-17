@@ -3,10 +3,15 @@
  *
  * Three things here are deliberate and easy to get wrong elsewhere:
  *
- * - **Strong consistency.** Blobs are eventually consistent by default, with
- *   up to sixty seconds of propagation. A sync engine that writes and then
- *   lists would miss its own write for a minute, which is exactly the bug the
- *   coach would report as "it did not save".
+ * - **Strong consistency is per read, never on the store.** Blobs are
+ *   eventually consistent by default, and a write followed by a read of the
+ *   same key needs better than that. But setting it on the STORE poisons
+ *   list(): a listing then goes to the uncached edge endpoint, which does not
+ *   serve listings, answers 404 - and the client turns a 404 into an EMPTY
+ *   RESULT with no error at all. Writes kept working, reads by key kept
+ *   working, and every listing said the library was empty. Measured on the
+ *   live site: PUT 200, readBack ok, list 0, with nine exercises in the store.
+ *   So: eventual by default, and STRONG passed to the keyed reads that need it.
  * - **Region.** A site-wide store does NOT inherit the site's function region;
  *   omitting it lands the data wherever the API defaults to, and a store's
  *   data does not move if the value changes later. The app is Russian, so
@@ -39,8 +44,11 @@ function deployContext(): string {
   return g?.env?.get?.('CONTEXT') ?? g?.context?.deploy?.context ?? ''
 }
 
+/** pass to a KEYED read that must not see a stale value */
+export const STRONG = { consistency: 'strong' } as const
+
 export function openStore() {
-  const options = { name: STORE_NAME, consistency: 'strong' as const, region: REGION }
+  const options = { name: STORE_NAME, region: REGION }
   const context = deployContext()
   /**
    * Unknown context means the SITE-WIDE store, not the deploy one.
