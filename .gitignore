@@ -25,3 +25,6 @@ dist-ssr
 
 # Claude Code harness state (agent worktrees etc.)
 .claude/
+
+# Netlify local state (Blobs sandbox, function bundles) - never user code
+.netlify
