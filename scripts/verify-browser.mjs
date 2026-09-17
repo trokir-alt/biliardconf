@@ -69,14 +69,32 @@ const scene = (page) =>
 
 /** table mm -> page css px, using the layout the app publishes */
 async function toPage(page, mx, my) {
+  const [p] = await toPageAll(page, [[mx, my]])
+  return p
+}
+
+/**
+ * Several points through ONE reading of the layout and the canvas box.
+ *
+ * Calling toPage twice is not the same thing: the captions above and below
+ * the table change height when a title appears or goes, and a canvas that
+ * moves three pixels between the two conversions makes a drag look three
+ * pixels short. That is what made the strike dot "miss" by 6% of its radius
+ * on the tablet - the app had put it exactly where the pointer went, and the
+ * check was comparing two different layouts.
+ */
+async function toPageAll(page, points) {
   const bb = await page.locator('canvas').first().boundingBox()
   return page.evaluate(
-    ([mx, my, bx, by]) => {
+    ([pts, bx, by]) => {
       const l = window.__layout
-      if (l.rotation === 90) return [bx + (-my * l.scale + l.x), by + (mx * l.scale + l.y)]
-      return [bx + (mx * l.scale + l.x), by + (my * l.scale + l.y)]
+      return pts.map(([mx, my]) =>
+        l.rotation === 90
+          ? [bx + (-my * l.scale + l.x), by + (mx * l.scale + l.y)]
+          : [bx + (mx * l.scale + l.x), by + (my * l.scale + l.y)],
+      )
     },
-    [mx, my, bb.x, bb.y],
+    [points, bb.x, bb.y],
   )
 }
 
