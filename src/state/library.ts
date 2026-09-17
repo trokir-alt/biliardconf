@@ -250,7 +250,6 @@ export const useLibrary = create<LibraryState>()((set, get) => {
 
       const draft = loadDraft()
       let items = await listMeta()
-      const alive = items.filter((m) => m.deletedAt === null)
       let opened: string | null = null
 
       if (draft?.id && items.some((m) => m.id === draft.id)) {
@@ -279,6 +278,9 @@ export const useLibrary = create<LibraryState>()((set, get) => {
       }
 
       if (!opened) {
+        // read after the branches above, not before: one of them may have
+        // added a record, and another tab may have added it for us
+        const alive = items.filter((m) => m.deletedAt === null)
         const want = (await lastOpenId()) ?? alive[0]?.id ?? null
         const pick = alive.find((m) => m.id === want) ?? alive[0] ?? null
         if (pick && !touched) {
