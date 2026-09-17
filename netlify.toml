@@ -8,6 +8,13 @@
   # with a clear message instead of a confusing build error.
   NODE_VERSION = "20"
 
+# The API lives in functions; the SPA fallback below must not swallow it.
+[[redirects]]
+  from = "/api/*"
+  to = "/api/:splat"
+  status = 200
+  force = false
+
 # single page app: everything falls back to the entry document
 [[redirects]]
   from = "/*"
