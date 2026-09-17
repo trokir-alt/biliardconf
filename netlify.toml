@@ -8,14 +8,14 @@
   # with a clear message instead of a confusing build error.
   NODE_VERSION = "20"
 
-# The API lives in functions; the SPA fallback below must not swallow it.
-[[redirects]]
-  from = "/api/*"
-  to = "/api/:splat"
-  status = 200
-  force = false
-
-# single page app: everything falls back to the entry document
+# Single page app: everything falls back to the entry document.
+#
+# There is deliberately NO rule for /api here. The functions declare their own
+# paths in code (export const config = { path: '/api/...' }), and a function
+# with a declared path is matched before static resolution - that is what the
+# `preferStatic` option exists to turn off. A hand-written /api rule would
+# either be a no-op or a rewrite to itself, and neither is worth the risk of
+# shadowing the routing that is already correct.
 [[redirects]]
   from = "/*"
   to = "/index.html"

@@ -20,6 +20,7 @@
  * it should not be repainted sixty times a second either.
  */
 
+import { memo } from 'react'
 import { Group, Image as KImage } from 'react-konva'
 import type { TableGeometry } from '../model/table'
 import { CUSHION_MM, RAIL_MM } from '../model/table'
@@ -34,7 +35,12 @@ const RAIL_AT = 5.5 / 8
 /** white on dark wood: present, not shouting */
 const RAIL_OPACITY = 0.5
 
-export function Watermark({ g, density }: { g: TableGeometry; density: Density }) {
+/**
+ * Memo for the same reason as TableView: this layer's props are rebuilt on
+ * every render, so without it every frame of a drag would repaint the whole
+ * grid of signatures underneath the balls.
+ */
+export const Watermark = memo(function Watermark({ g, density }: { g: TableGeometry; density: Density }) {
   useSvgImages() // redraw once the SVG has decoded
   const img = svgImage(STAMP_SVG)
   if (!img) return null
@@ -68,4 +74,4 @@ export function Watermark({ g, density }: { g: TableGeometry; density: Density }
       />
     </Group>
   )
-}
+})

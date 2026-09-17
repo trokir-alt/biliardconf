@@ -139,13 +139,17 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     }
   }
 
-  const capture = async (id: string, at: number) => {
-    if (!previewSource) return
+  /** take a thumbnail of what is on the canvas; false when there is none */
+  const capture = async (id: string, at: number): Promise<boolean> => {
+    if (!previewSource) return false
     try {
       const data = await previewSource()
-      if (data) await putPreview(id, at, data)
+      if (!data) return false
+      await putPreview(id, at, data)
+      return true
     } catch {
       // a thumbnail is decoration; the exercise is already saved
+      return false
     }
   }
 
@@ -159,7 +163,20 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     const id0 = get().currentId
     if (json === lastCommitted) {
       set({ editorDirty: false })
-      if (withPreview && id0) await capture(id0, now())
+      if (!withPreview || !id0) return
+      const at = now()
+      const got = await capture(id0, at)
+      const meta = get().items.find((m) => m.id === id0)
+      // An exercise whose thumbnail the server has never seen gets one
+      // revision to publish it, and only one: a thumbnail rides on the write
+      // that carries the drawing, and without a write there is nothing to
+      // ride on. After that first time meta.previewAt is set and this is
+      // skipped, so opening the library does not churn revisions.
+      if (got && meta && meta.previewAt === 0) {
+        await commitLocal({ id: id0, scene, title: titleOf(scene) })
+        await refresh()
+        announce()
+      }
       return
     }
     let id = id0

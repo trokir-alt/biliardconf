@@ -142,6 +142,24 @@ async function twoDevices() {
   }, got.id)
   check('two devices: the second device can open it', sceneB === 2, `${sceneB} objects`)
 
+  // the thumbnail is captured on A's canvas, uploaded with the write, and
+  // fetched by B: the whole path, end to end
+  await a.page.evaluate(() => window.__library.getState().commitNow(true))
+  await sync(a, 30000)
+  const onServer = await fetch(`${API}/api/exercises?since=0`).then((r) => r.json())
+  check('two devices: the thumbnail is on the server', onServer.items[0]?.previewAt > 0, `previewAt ${onServer.items[0]?.previewAt}`)
+  await sync(b, 30000)
+  await b.page.getByRole('button', { name: /Библиотека/ }).click()
+  await b.page.locator('.lib-card').first().waitFor({ timeout: 20000 })
+  const shown = await b.page
+    .locator('img.lib-card__thumb')
+    .first()
+    .waitFor({ timeout: 20000 })
+    .then(() => true)
+    .catch(() => false)
+  check('two devices: the second device shows the thumbnail', shown)
+  await b.page.locator('.library').getByRole('button', { name: 'Закрыть' }).click()
+
   // the brief is explicit: no authorisation, no login, no passwords
   const body = await a.page.locator('body').innerText()
   const noLogin =

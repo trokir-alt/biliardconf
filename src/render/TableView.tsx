@@ -15,6 +15,7 @@
  * differently and the table reads as a photograph rather than a diagram.
  */
 
+import { memo } from 'react'
 import { Circle, Group, Line, Rect, Ring, Shape } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
 import type { Shape as KonvaShape } from 'konva/lib/Shape'
@@ -312,7 +313,21 @@ function CushionShadow({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
 
 /* --------------------------------------------------------------------- view */
 
-export function TableView({ g }: { g: TableGeometry }): JSX.Element {
+/**
+ * The table itself.
+ *
+ * Wrapped in memo, and that wrapper is load-bearing rather than tidiness: its
+ * props are fresh arrays and objects on every render (gradient stops, points),
+ * so react-konva would write them all back onto the Konva nodes and mark this
+ * layer dirty. The layer then redraws - sixty gradient-and-shadow shapes -
+ * on every frame of a drag, which is precisely what giving the table its own
+ * layer was meant to prevent. Measured on a software renderer: 1.4 s a frame
+ * with it, none without.
+ *
+ * `g` comes from a useMemo keyed on the table config, so this re-renders when
+ * the table changes and at no other time.
+ */
+export const TableView = memo(function TableView({ g }: { g: TableGeometry }): JSX.Element {
   const felt = CLOTH[g.cfg.cloth]
 
   // cloth footprint: the play field plus the cushion band it wraps
@@ -516,4 +531,4 @@ export function TableView({ g }: { g: TableGeometry }): JSX.Element {
       ))}
     </Group>
   )
-}
+})

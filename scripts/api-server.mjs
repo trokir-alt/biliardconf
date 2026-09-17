@@ -107,9 +107,6 @@ const server = createServer((req, res) => {
       out.headers.forEach((v, k) => {
         headers[k] = v
       })
-      // the browser talks to this server through the vite preview proxy on a
-      // different port, so the answer has to allow it
-      headers['access-control-allow-origin'] = '*'
       res.writeHead(out.status, headers)
       res.end(buf)
     } catch (e) {
