@@ -469,13 +469,21 @@ async function stage3(page, label) {
   const [px0, py0] = mmToPx(snap, sp.x, sp.y)
   const [px1, py1] = mmToPx(snap, target.x, target.y)
   const grab = { x: Math.round(px0) - px0, y: Math.round(py0) - py0 } // press offset from the dot centre
+  // a panel over the dot would take the press instead of the canvas
+  if (await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.props'), [Math.round(px0), Math.round(py0)])) {
+    await page.evaluate(() => window.__store.getState().select(null))
+    await page.waitForTimeout(80)
+  }
   await page.mouse.move(Math.round(px0), Math.round(py0))
   await page.mouse.down()
-  await page.mouse.move(Math.round(px1), Math.round(py1), { steps: 18 })
+  // two moves to the same point, no interpolation: this check is about where
+  // the dot ends up, and interpolated moves only add ways for one to be
+  // coalesced away or arrive after the release
+  await page.mouse.move(Math.round(px1), Math.round(py1))
   await page.mouse.move(Math.round(px1), Math.round(py1))
   // Konva commits a drag on an animation frame: releasing in the same frame
   // as the last move would leave the node a frame behind the pointer
-  await page.waitForTimeout(40)
+  await page.waitForTimeout(60)
   await page.mouse.up()
   await page.waitForTimeout(150)
   const seen = pxToMm(snap, Math.round(px1) - grab.x, Math.round(py1) - grab.y)
