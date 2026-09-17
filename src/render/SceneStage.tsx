@@ -117,7 +117,9 @@ export function SceneStage({ stageRef }: SceneStageProps) {
     if (!stage || !wrap) return
     const c = stage.container().getBoundingClientRect()
     const w = wrap.getBoundingClientRect()
-    useView.getState().setView(layout, c.left - w.left, c.top - w.top)
+    useView
+      .getState()
+      .setView(layout, c.left - w.left, c.top - w.top, { left: w.left, top: w.top, width: w.width, height: w.height })
   }, [layout, stageRef, box.w, box.h])
 
   /* Inspection hook for the browser test suite; a no-op in a normal build. */

@@ -67,35 +67,53 @@ const scene = (page) =>
     return s ? JSON.parse(JSON.stringify(s)) : null
   })
 
+/**
+ * One reading of everything needed to convert between table millimetres and
+ * page pixels: the layer transform the app publishes, and where the canvas
+ * sits on the page.
+ *
+ * Every conversion for one gesture must come from the SAME reading. The
+ * captions above and below the table change height when a title appears or a
+ * panel opens, and the canvas then moves a few pixels; a press converted
+ * against one layout and a release against another makes an exact drag look
+ * short. That is what "the dot misses by 6% of its radius" turned out to be -
+ * the app was putting it precisely where the pointer went.
+ */
+async function layoutSnap(page) {
+  const bb = await page.locator('canvas').first().boundingBox()
+  const l = await page.evaluate(() => {
+    const v = window.__layout
+    return { scale: v.scale, x: v.x, y: v.y, rotation: v.rotation }
+  })
+  return { ...l, left: bb.x, top: bb.y }
+}
+
+/** table mm -> page css px, against a snapshot */
+function mmToPx(snap, mx, my) {
+  return snap.rotation === 90
+    ? [snap.left + (-my * snap.scale + snap.x), snap.top + (mx * snap.scale + snap.y)]
+    : [snap.left + (mx * snap.scale + snap.x), snap.top + (my * snap.scale + snap.y)]
+}
+
+/** page css px -> table mm, against the same snapshot */
+function pxToMm(snap, px, py) {
+  const dx = px - snap.left - snap.x
+  const dy = py - snap.top - snap.y
+  return snap.rotation === 90
+    ? { x: dy / snap.scale, y: -dx / snap.scale }
+    : { x: dx / snap.scale, y: dy / snap.scale }
+}
+
 /** table mm -> page css px, using the layout the app publishes */
 async function toPage(page, mx, my) {
   const [p] = await toPageAll(page, [[mx, my]])
   return p
 }
 
-/**
- * Several points through ONE reading of the layout and the canvas box.
- *
- * Calling toPage twice is not the same thing: the captions above and below
- * the table change height when a title appears or goes, and a canvas that
- * moves three pixels between the two conversions makes a drag look three
- * pixels short. That is what made the strike dot "miss" by 6% of its radius
- * on the tablet - the app had put it exactly where the pointer went, and the
- * check was comparing two different layouts.
- */
+/** several points through one reading; see layoutSnap */
 async function toPageAll(page, points) {
-  const bb = await page.locator('canvas').first().boundingBox()
-  return page.evaluate(
-    ([pts, bx, by]) => {
-      const l = window.__layout
-      return pts.map(([mx, my]) =>
-        l.rotation === 90
-          ? [bx + (-my * l.scale + l.x), by + (mx * l.scale + l.y)]
-          : [bx + (mx * l.scale + l.x), by + (my * l.scale + l.y)],
-      )
-    },
-    [points, bb.x, bb.y],
-  )
+  const snap = await layoutSnap(page)
+  return points.map(([mx, my]) => mmToPx(snap, mx, my))
 }
 
 /** press-drag-release across the table, in mm */
@@ -413,11 +431,10 @@ async function stage3(page, label) {
   // release point. Mouse events carry whole css pixels, so the point the app
   // saw is the rounded press and release positions, not the fractional ones
   const target = { x: sp.x + 0.5 * r, y: sp.y - 0.3 * r }
-  // both points off one layout reading: see toPageAll
-  const [[px0, py0], [px1, py1]] = await toPageAll(page, [
-    [sp.x, sp.y],
-    [target.x, target.y],
-  ])
+  // one snapshot for the press, the release AND the conversion back: see layoutSnap
+  const snap = await layoutSnap(page)
+  const [px0, py0] = mmToPx(snap, sp.x, sp.y)
+  const [px1, py1] = mmToPx(snap, target.x, target.y)
   const grab = { x: Math.round(px0) - px0, y: Math.round(py0) - py0 } // press offset from the dot centre
   await page.mouse.move(Math.round(px0), Math.round(py0))
   await page.mouse.down()
@@ -428,15 +445,7 @@ async function stage3(page, label) {
   await page.waitForTimeout(40)
   await page.mouse.up()
   await page.waitForTimeout(150)
-  const seen = await page.evaluate(
-    ([x, y]) => {
-      const l = window.__layout
-      const c = document.querySelector('canvas').getBoundingClientRect()
-      const dx = x - c.left - l.x, dy = y - c.top - l.y
-      return l.rotation === 90 ? { x: dy / l.scale, y: -dx / l.scale } : { x: dx / l.scale, y: dy / l.scale }
-    },
-    [Math.round(px1) - grab.x, Math.round(py1) - grab.y],
-  )
+  const seen = pxToMm(snap, Math.round(px1) - grab.x, Math.round(py1) - grab.y)
   let it = (await scene(page)).items.find((i) => i.id === sp.id)
   const err = Math.hypot(it.dot.u * r - (seen.x - sp.x), it.dot.v * r - (seen.y - sp.y)) / r
   const where = await page.evaluate(() => ({ scale: window.__layout.scale, rot: window.__layout.rotation, zoom: window.__view.getState().viewport.zoom }))
@@ -474,6 +483,26 @@ async function stage3(page, label) {
   sc = await scene(page)
   const pw = sc.items.find((i) => i.type === 'power')
   check(`${label}: power plate is placed by a tap at 2,5`, !!pw && pw.value === 2.5)
+
+  /* The floating properties panel must never land on a control. It is
+     positioned in page coordinates with no positioned ancestor, and when that
+     origin was wrong it sat on the toolbar and swallowed the clicks meant for
+     «Вернуть» and «Горизонтально» - on the tablet, which is the screen the
+     coach actually works on. */
+  const covered = await page.evaluate(() => {
+    const panel = document.querySelector('.props')
+    if (!panel) return { ok: false, hidden: ['no panel at all'] }
+    const hidden = []
+    for (const btn of document.querySelectorAll('.toolbar button, .m-dock button, .m-top button')) {
+      const r = btn.getBoundingClientRect()
+      if (!r.width || !r.height) continue
+      const el = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      if (el && el.closest('.props')) hidden.push((btn.getAttribute('aria-label') || btn.textContent || '?').trim().slice(0, 16))
+    }
+    return { ok: hidden.length === 0, hidden }
+  })
+  check(`${label}: the properties panel covers no control`, covered.ok, covered.hidden.join(', '))
+
   await tool(page, 'Выбор')
   const SERIES = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5]
   const inSeries = (v) => SERIES.includes(v)

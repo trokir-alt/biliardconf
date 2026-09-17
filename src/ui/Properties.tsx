@@ -34,9 +34,22 @@ export function Properties() {
     ]
     const ys = corners.map((c) => c.y)
     // on a phone: is the object in the lower half of the canvas?
-    const mid = view.stageTop + view.layout.stageH / 2
+    const mid = view.wrap.top + view.stageTop + view.layout.stageH / 2
+    /**
+     * Keep the panel inside the canvas area.
+     *
+     * Without the clamp it follows the object out of the stage: on a tablet
+     * in portrait the table stands tall and narrow, an object near the left
+     * cushion puts the panel at a negative offset, and it lands on top of the
+     * toolbar. Measured on a 1024-wide screen: it covered «Вернуть» and
+     * «Горизонтально», which then could not be pressed at all while anything
+     * was selected.
+     */
+    const minLeft = view.wrap.left + 8
+    const maxLeft = Math.max(minLeft, view.wrap.left + view.wrap.width - 160)
+    const raw = Math.min(...corners.map((c) => c.x))
     return {
-      left: Math.min(...corners.map((c) => c.x)),
+      left: Math.max(minLeft, Math.min(raw, maxLeft)),
       top: Math.max(...ys) + 12,
       low: (Math.min(...ys) + Math.max(...ys)) / 2 > mid,
     }
