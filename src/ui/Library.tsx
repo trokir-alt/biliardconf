@@ -70,6 +70,8 @@ export function Library({ onClose }: { onClose: () => void }) {
   const remove = useLibrary((s) => s.remove)
   const restore = useLibrary((s) => s.restore)
   const refresh = useLibrary((s) => s.refresh)
+  const noteConflict = useLibrary((s) => s.noteConflict)
+  const noteProblem = useLibrary((s) => s.noteProblem)
 
   const [tab, setTab] = useState<Tab>('items')
   const [query, setQuery] = useState('')
@@ -86,7 +88,13 @@ export function Library({ onClose }: { onClose: () => void }) {
       setPreviews(map)
       await refresh()
     })()
-  }, [commitNow, refresh])
+    // the notices below are shown once: the coach has read them by the time
+    // they close this screen, and a banner that never goes away is furniture
+    return () => {
+      noteConflict(null)
+      noteProblem(null)
+    }
+  }, [commitNow, refresh, noteConflict, noteProblem])
 
   const alive = useMemo(() => items.filter((m) => m.deletedAt === null), [items])
   const trashed = useMemo(() => items.filter((m) => m.deletedAt !== null), [items])
