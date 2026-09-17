@@ -1077,6 +1077,9 @@ kbd {
 
 .library__head .btn--icon {
   margin-left: auto;
+  /* without this the close button stretches across the whole header: the head
+     is a flex row and a lone button grows to fill what the title leaves */
+  flex: 0 0 auto;
 }
 
 .library__tabs {
@@ -1107,6 +1110,10 @@ kbd {
 
 .library__toolbar .input {
   flex: 1 1 200px;
+}
+
+.library__toolbar .btn {
+  flex: 0 0 auto;
 }
 
 .library__foot {
