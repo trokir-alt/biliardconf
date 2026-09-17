@@ -1251,7 +1251,7 @@ async function stage6(page, label) {
   )
 
   const before = (await titles()).length
-  await card.getByRole('button', { name: 'Дублировать' }).click()
+  await L.locator('.lib-card').first().getByRole('button', { name: 'Дублировать' }).click()
   await page.waitForFunction((n) => document.querySelectorAll('.lib-card').length === n + 1, before, { timeout: 20000 })
   check(`${label}: duplicate makes a second exercise`, (await titles()).some((t) => t.includes('(копия)')), (await titles()).join(' | '))
 
