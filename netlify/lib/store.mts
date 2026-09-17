@@ -44,6 +44,27 @@ export function openStore() {
   return deployContext() === 'production' ? getStore(options) : getDeployStore(options)
 }
 
+/**
+ * Which store this runtime would open, in plain words.
+ *
+ * The distinction matters more than it looks: a deploy-scoped store is a NEW
+ * empty store for every deploy, so picking it in production would quietly
+ * empty the library on every release. /api/health reports this so the answer
+ * is a fact rather than a reading of the code.
+ */
+export function storeScope() {
+  const g = (globalThis as { Netlify?: NetlifyGlobal }).Netlify
+  const context = deployContext()
+  return {
+    context: context || '(none)',
+    contextFromEnv: g?.env?.get?.('CONTEXT') ?? null,
+    contextFromRequest: g?.context?.deploy?.context ?? null,
+    scope: context === 'production' ? 'site-wide' : 'per-deploy',
+    region: REGION,
+    store: STORE_NAME,
+  }
+}
+
 /** JSON out, with the headers every answer here needs */
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {

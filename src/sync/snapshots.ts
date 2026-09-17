@@ -15,7 +15,19 @@
 
 import type { ExerciseRecord } from './wire'
 import { beforeRestoreTitle } from './wire'
-import { commitLocal, createLocal, listMeta, now, readRecord } from './local'
+import {
+  clockSkew,
+  commitLocal,
+  createLocal,
+  deviceId,
+  isDurable,
+  listMeta,
+  loadCursor,
+  now,
+  readRecord,
+  readScene,
+} from './local'
+import { syncTrace } from './engine'
 
 const CALL_TIMEOUT_MS = 10_000
 
@@ -81,24 +93,70 @@ export async function restoreFromSnapshot(
  * shares; from this device when it does not, because a backup that refuses to
  * be made without a network is not a backup.
  */
-export async function buildBackup(): Promise<{ body: unknown; source: 'server' | 'device' }> {
+export async function buildBackup(): Promise<{
+  body: unknown
+  source: 'server' | 'device'
+  serverEmpty: boolean
+}> {
+  const diagnostics = await collectDiagnostics().catch(() => ({ failed: true }))
   try {
     const body = await api<{ count: number; records: unknown[] }>('/api/backup')
     // a file that claims more records than it carries is a broken backup and
     // must not be handed over as if it were whole
     if (Array.isArray(body.records) && body.records.length >= body.count) {
-      return { body, source: 'server' }
+      // a server copy that is EMPTY while this device holds exercises is not
+      // a backup of anything - hand over what is actually here, and say so
+      if (body.count === 0 && diagnostics && (diagnostics as { exercises?: { alive?: number } }).exercises?.alive) {
+        return { body: { ...(await localBackup()), serverSaidEmpty: true, diagnostics }, source: 'device', serverEmpty: true }
+      }
+      return { body: { ...body, diagnostics }, source: 'server', serverEmpty: body.count === 0 }
     }
   } catch {
     // fall through to the local copy
   }
+  return { body: { ...(await localBackup()), diagnostics }, source: 'device', serverEmpty: false }
+}
+
+async function localBackup(): Promise<{ exportedAt: number; count: number; records: ExerciseRecord[] }> {
   const metas = await listMeta()
   const records: ExerciseRecord[] = []
   for (const m of metas) {
     const rec = await readRecord(m.id)
     if (rec) records.push({ ...m, scene: rec.scene })
   }
-  return { body: { exportedAt: now(), count: records.length, records }, source: 'device' }
+  return { exportedAt: now(), count: records.length, records }
+}
+
+/**
+ * What this device knows about its own syncing.
+ *
+ * It rides along in the backup file because that file is the one thing a
+ * coach can hand over without being asked to read anything. When exercises
+ * are on the device but not on the server, this is what says why: whether
+ * anything is queued, what the last exchanges answered, and what the engine
+ * last failed on.
+ */
+export async function collectDiagnostics(): Promise<Record<string, unknown>> {
+  const metas = await listMeta()
+  let withoutScene = 0
+  for (const m of metas) {
+    if (m.deletedAt === null && !(await readScene(m.id))) withoutScene++
+  }
+  return {
+    deviceId: await deviceId().catch(() => 'unknown'),
+    cursor: await loadCursor().catch(() => -1),
+    clockSkewMs: clockSkew(),
+    storageDurable: await isDurable().catch(() => false),
+    exercises: {
+      total: metas.length,
+      alive: metas.filter((m) => m.deletedAt === null).length,
+      queued: metas.filter((m) => m.dirty === 1).length,
+      neverSent: metas.filter((m) => m.rev === 0).length,
+      // a record whose drawing is missing is skipped by the queue in silence
+      withoutScene,
+    },
+    recentCalls: syncTrace(),
+  }
 }
 
 export function downloadJson(body: unknown, name: string): void {

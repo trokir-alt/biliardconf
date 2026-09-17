@@ -63,10 +63,35 @@ type Json = Record<string, unknown>
 
 class Offline extends Error {}
 
+/**
+ * The last few exchanges, kept so a failure can be described instead of
+ * guessed at.
+ *
+ * A write that never lands is the worst kind of bug here: the library looks
+ * saved, the header can still read "synchronised", and the only evidence is
+ * on the device. This ring is that evidence, and it travels in the backup
+ * file the coach can send.
+ */
+type CallTrace = { method: string; path: string; status: number | string; ms: number }
+const trace: CallTrace[] = []
+
+export function syncTrace(): CallTrace[] {
+  return trace.slice()
+}
+
 async function call(path: string, init: RequestInit = {}): Promise<Response> {
+  const method = init.method ?? 'GET'
+  const started = Date.now()
+  const note = (status: number | string) => {
+    trace.push({ method, path: path.replace(/ex-[0-9a-z]+-[0-9a-f]+/, 'ex-…'), status, ms: Date.now() - started })
+    if (trace.length > 24) trace.shift()
+  }
   try {
-    return await fetch(path, { ...init, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) })
-  } catch {
+    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) })
+    note(res.status)
+    return res
+  } catch (e) {
+    note(e instanceof Error ? e.name || 'error' : 'error')
     // a timeout, a refused connection and a dropped wifi are one thing here:
     // the server did not answer, so nothing about local state may change
     throw new Offline('no network')

@@ -97,6 +97,7 @@ export function Library({ onClose }: { onClose: () => void }) {
   }, [commitNow, refresh, noteConflict, noteProblem])
 
   const alive = useMemo(() => items.filter((m) => m.deletedAt === null), [items])
+  const queued = useMemo(() => items.filter((m) => m.dirty === 1).length, [items])
   const trashed = useMemo(() => items.filter((m) => m.deletedAt !== null), [items])
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -119,10 +120,16 @@ export function Library({ onClose }: { onClose: () => void }) {
   )
 
   const saveBackup = useCallback(async () => {
-    const { body, source } = await buildBackup()
+    const { body, source, serverEmpty } = await buildBackup()
     const d = new Date()
     downloadJson(body, `biliardconf-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.json`)
-    setNote(source === 'server' ? 'Выгружено с сервера' : 'Сервер недоступен, выгружено с устройства')
+    setNote(
+      serverEmpty
+        ? 'На сервере пусто — выгружено с этого устройства. В файле есть диагностика обмена.'
+        : source === 'server'
+          ? 'Выгружено с сервера'
+          : 'Сервер недоступен, выгружено с устройства',
+    )
   }, [])
 
   return (
@@ -151,6 +158,11 @@ export function Library({ onClose }: { onClose: () => void }) {
         <p className="library__warn">
           Браузер не дал сохранить библиотеку на устройстве. Упражнения уйдут на сервер, но локально не переживут
           закрытие вкладки.
+        </p>
+      )}
+      {queued > 0 && (
+        <p className="library__note">
+          Ждёт отправки на сервер: {plural(queued, 'упражнение', 'упражнения', 'упражнений')}
         </p>
       )}
       {lastProblem && <p className="library__warn">{lastProblem}</p>}
