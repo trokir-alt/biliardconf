@@ -21,11 +21,27 @@ import { getDeployStore, getStore } from '@netlify/blobs'
 export const STORE_NAME = 'exercises'
 const REGION = 'eu-central-1' as const
 
+type NetlifyGlobal = {
+  env?: { get?: (key: string) => string | undefined }
+  context?: { deploy?: { context?: string } } | null
+}
+
+/**
+ * Which deploy context this is.
+ *
+ * The CONTEXT environment variable first, and that order matters: the
+ * request context is null in a scheduled function, so reading it alone would
+ * send the nightly snapshot and sweep to a deploy-scoped store while the
+ * library lives in the site-wide one - a job that quietly works on nothing.
+ */
+function deployContext(): string {
+  const g = (globalThis as { Netlify?: NetlifyGlobal }).Netlify
+  return g?.env?.get?.('CONTEXT') ?? g?.context?.deploy?.context ?? ''
+}
+
 export function openStore() {
-  const ctx = (globalThis as { Netlify?: { context?: { deploy?: { context?: string } } } }).Netlify
-  const isProduction = ctx?.context?.deploy?.context === 'production'
   const options = { name: STORE_NAME, consistency: 'strong' as const, region: REGION }
-  return isProduction ? getStore(options) : getDeployStore(options)
+  return deployContext() === 'production' ? getStore(options) : getDeployStore(options)
 }
 
 /** JSON out, with the headers every answer here needs */
