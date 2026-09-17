@@ -16,15 +16,18 @@ import type { ExportFormat } from '../../lib/exportImage'
 import { GLYPH, TOOLS } from '../tools'
 import { BrandSign } from '../Brand'
 import { DensityPicker } from '../DensityPicker'
+import { SyncBadge } from '../SyncBadge'
+import { useLibrary } from '../../state/library'
 import { Sheet } from './Sheet'
 
 export type MobileShellProps = {
   stageRef: React.MutableRefObject<Konva.Stage | null>
   onExport: (scale: number, format: ExportFormat) => void
   onCopy: (scale: number) => void
+  onOpenLibrary: () => void
 }
 
-export function MobileShell({ stageRef, onExport, onCopy }: MobileShellProps) {
+export function MobileShell({ stageRef, onExport, onCopy, onOpenLibrary }: MobileShellProps) {
   const [sheet, setSheet] = useState<'export' | 'menu' | null>(null)
   const tool = useStore((s) => s.tool)
   const setTool = useStore((s) => s.setTool)
@@ -44,6 +47,15 @@ export function MobileShell({ stageRef, onExport, onCopy }: MobileShellProps) {
     <div className="m-shell">
       <header className="m-top">
         <BrandSign size={32} />
+        <button
+          type="button"
+          className="btn btn--icon"
+          onClick={onOpenLibrary}
+          aria-label="Библиотека"
+          title="Библиотека"
+        >
+          {GLYPH.library}
+        </button>
         <input
           className="m-top__title"
           type="text"
@@ -70,6 +82,7 @@ export function MobileShell({ stageRef, onExport, onCopy }: MobileShellProps) {
         <button type="button" className="btn btn--icon" onClick={() => setSheet('menu')} aria-label="Меню">
           {GLYPH.more}
         </button>
+        <SyncBadge compact />
       </header>
 
       <main className="stage-wrap m-stage">
@@ -164,7 +177,7 @@ function ExportSheet({ open, onClose, onExport, onCopy }: { open: boolean; onClo
 
 function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const rackPyramid = useStore((s) => s.rackPyramid)
-  const newExercise = useStore((s) => s.newExercise)
+  const createNew = useLibrary((s) => s.createNew)
   const orientation = useStore((s) => s.orientation)
   const setOrientation = useStore((s) => s.setOrientation)
   const cloth = useStore((s) => s.scene.table.cloth)
@@ -177,11 +190,10 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toggleSnap = useStore((s) => s.toggleSnap)
   const noOverlap = useStore((s) => s.noOverlap)
   const toggleNoOverlap = useStore((s) => s.toggleNoOverlap)
+  /* nothing is lost: the library takes a revision before the table is cleared */
   const askNew = () => {
-    if (window.confirm('Начать новое упражнение? Стол, название и описание будут очищены.')) {
-      newExercise()
-      onClose()
-    }
+    void createNew()
+    onClose()
   }
   return (
     <Sheet title="Стол" open={open} onClose={onClose}>

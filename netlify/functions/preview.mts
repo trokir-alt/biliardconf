@@ -1,7 +1,7 @@
 /**
  * The thumbnail for one exercise.
  *
- * The URL carries the rev it was captured at, so a fetched thumbnail can be
+ * The URL carries the stamp it was captured at, so a fetched thumbnail can be
  * cached for a year by the CDN and the browser: a library of a hundred rows
  * then costs a hundred function calls ONCE, and nothing on every repaint.
  */
@@ -22,7 +22,7 @@ export default async (req: Request, context: Context) => {
     return new Response(hit, {
       headers: {
         'content-type': 'image/jpeg',
-        // keyed by rev in the query, so a new revision is a new URL
+        // keyed by the stamp in the query, so a new capture is a new URL
         'cache-control': 'public, max-age=31536000, immutable',
       },
     })

@@ -81,7 +81,7 @@ export default async (req: Request, context: Context) => {
     if (body.baseRev !== 0) return fail(410, 'gone', { id, sweptAt: 0 })
     if (req.method === 'DELETE') return fail(404, 'not-found')
   } else if (body.baseRev !== curMeta!.rev) {
-    return json({ error: 'conflict', server: (cur.data as ExerciseRecord) && metaOf(cur.data as ExerciseRecord), now: now() }, 409)
+    return json({ error: 'conflict', server: metaOf(cur.data as ExerciseRecord), now: now() }, 409)
   }
 
   const at = Math.max(now(), (curMeta?.updatedAt ?? 0) + 1)
@@ -101,7 +101,10 @@ export default async (req: Request, context: Context) => {
       : Array.isArray(put.scene?.items)
         ? put.scene.items.length
         : 0,
-    previewRev: Number((cur?.data as ExerciseRecord)?.previewRev ?? 0),
+    previewAt:
+      req.method === 'PUT' && Number.isFinite(Number(put.previewAt))
+        ? Number(put.previewAt)
+        : Number((cur?.data as ExerciseRecord)?.previewAt ?? 0),
   }
   const scene = req.method === 'DELETE' ? (cur?.data as ExerciseRecord)?.scene : put.scene
   if (req.method === 'PUT' && (!scene || typeof scene !== 'object')) return fail(400, 'bad-scene')

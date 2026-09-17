@@ -66,8 +66,15 @@ export type ExerciseMeta = {
   writeId: string
   /** how many objects the diagram holds, so a listing can show something */
   itemCount: number
-  /** the rev the preview was captured at, or 0 when there is none */
-  previewRev: number
+  /**
+   * The `clientUpdatedAt` of the scene the thumbnail shows, or 0 for none.
+   *
+   * A device's own clock and not the rev, because the thumbnail is captured
+   * on the device, from its live canvas, before the server has given the
+   * write a revision number. Another device compares it against what it has
+   * cached and fetches only when it is behind.
+   */
+  previewAt: number
 }
 
 /** A whole exercise: its metadata and the diagram itself. */
@@ -83,6 +90,8 @@ export type PutBody = {
   writeId: string
   title: string
   scene: Scene
+  /** the stamp of the thumbnail this device uploaded just before the write */
+  previewAt?: number
   /** only an explicit raise brings a tombstoned record back */
   undelete?: boolean
 }

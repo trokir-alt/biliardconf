@@ -16,6 +16,7 @@ export type ToolbarProps = {
   onExport: (scale: number, format: ExportFormat) => void
   /** must run synchronously inside the click, see copyExportToClipboard */
   onCopy: (scale: number) => void
+  onOpenLibrary: () => void
 }
 
 const EXPORT_SCALES = [1, 2, 3]
@@ -23,12 +24,15 @@ const EXPORT_SCALES = [1, 2, 3]
 import { TOOLS } from './tools'
 import { BrandLockup } from './Brand'
 import { DensityPicker } from './DensityPicker'
+import { SyncBadge } from './SyncBadge'
+import { useLibrary } from '../state/library'
 
-export function Toolbar({ onExport, onCopy }: ToolbarProps) {
+export function Toolbar({ onExport, onCopy, onOpenLibrary }: ToolbarProps) {
   const tool = useStore((s) => s.tool)
   const setTool = useStore((s) => s.setTool)
   const rackPyramid = useStore((s) => s.rackPyramid)
-  const newExercise = useStore((s) => s.newExercise)
+  const createNew = useLibrary((s) => s.createNew)
+  const libraryCount = useLibrary((s) => s.items.filter((m) => m.deletedAt === null).length)
   const undo = useStore((s) => s.undo)
   const redo = useStore((s) => s.redo)
   const canUndo = useStore(selectCanUndo)
@@ -52,15 +56,23 @@ export function Toolbar({ onExport, onCopy }: ToolbarProps) {
   /* the tool is sticky; tapping the active one again is the way back to select */
   const pick = (id: Tool) => setTool(tool === id && id !== 'select' ? 'select' : id)
 
-  const askNew = () => {
-    if (window.confirm('Начать новое упражнение? Стол, название и описание будут очищены.')) newExercise()
-  }
+  /* the current exercise is saved by the library first, so "new" costs nothing */
+  const askNew = () => void createNew()
 
   return (
     <aside className="toolbar">
       <div className="brand">
         <BrandLockup />
       </div>
+      <section className="tool-group">
+        <div className="tool-group__body">
+          <button type="button" className="btn btn--primary" onClick={onOpenLibrary}>
+            <span>Библиотека</span>
+            <span className="btn__hint">{libraryCount}</span>
+          </button>
+          <SyncBadge />
+        </div>
+      </section>
       <section className="tool-group">
         <h2 className="tool-group__title">Инструменты</h2>
         <div className="tool-group__body tool-grid">

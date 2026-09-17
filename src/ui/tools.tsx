@@ -59,6 +59,13 @@ export const GLYPH = {
   redo: glyph(<path d="M11 5 L15 9 L11 13 M15 9 H7 A4 4 0 0 0 7 17 H9" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />),
   share: glyph(<path d="M9 11 V3 M5.5 6.5 L9 3 L12.5 6.5 M4 10 V15 H14 V10" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />),
   more: glyph(<><circle cx="4" cy="9" r="1.6" fill="currentColor" /><circle cx="9" cy="9" r="1.6" fill="currentColor" /><circle cx="14" cy="9" r="1.6" fill="currentColor" /></>),
+  library: glyph(
+    <>
+      <rect x="3" y="3.5" width="4" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <rect x="8.5" y="3.5" width="4" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1.7" />
+      <path d="M14.2 4.6 L16.2 14.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </>,
+  ),
   fit: glyph(<path d="M3 7 V3 H7 M11 3 H15 V7 M15 11 V15 H11 M7 15 H3 V11" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" />),
 }
 

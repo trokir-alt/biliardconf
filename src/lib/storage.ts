@@ -20,6 +20,15 @@ import { DEFAULT_DENSITY, isDensity, type Density } from '../brand/watermark'
 import { DEFAULT_FULLNESS, clampFullness, normDeg } from '../model/item'
 
 const KEY = 'biliardconf.scene.v1'
+/**
+ * Which library record the autosaved scene belongs to, and when it was
+ * written. The scene itself stays in localStorage because that is the one
+ * store a browser lets us write synchronously as the tab is killed;
+ * IndexedDB, where the library lives, quietly drops writes at that moment.
+ * So this slot is the crash net and the library is the record, and the stamp
+ * is how the two are told apart on the next boot.
+ */
+const DRAFT_KEY = 'biliardconf.draft.v1'
 /** the watermark density is a setting, not scene data: it belongs to the
     coach and their screen, not to the exercise they are drawing */
 const DENSITY_KEY = 'biliardconf.watermark.v1'
@@ -212,22 +221,80 @@ export function loadScene(): Scene | null {
 
 let timer: ReturnType<typeof setTimeout> | null = null
 let pending: Scene | null = null
+let pendingOwner: string | null = null
 
 function flush(): void {
   timer = null
   if (!pending) return
   try {
     window.localStorage.setItem(KEY, JSON.stringify(pending))
+    window.localStorage.setItem(
+      DRAFT_KEY,
+      JSON.stringify({ id: pendingOwner, at: Date.now() }),
+    )
   } catch {
     // quota or private mode: autosave is a convenience, never a hard failure
   }
   pending = null
 }
 
-export function saveScene(scene: Scene): void {
+/**
+ * @param ownerId the library record this scene is a draft of, or null while
+ *   the exercise is new and has no record yet.
+ */
+export function saveScene(scene: Scene, ownerId: string | null = null): void {
   pending = scene
+  pendingOwner = ownerId
   if (timer !== null) return
   timer = setTimeout(flush, DEBOUNCE_MS)
+}
+
+/** the autosaved scene together with what it is a draft of, or null */
+export function loadDraft(): { scene: Scene; id: string | null; at: number } | null {
+  const scene = loadScene()
+  if (!scene) return null
+  try {
+    const raw = window.localStorage.getItem(DRAFT_KEY)
+    if (!raw) return { scene, id: null, at: 0 }
+    const o = JSON.parse(raw) as Record<string, unknown>
+    return {
+      scene,
+      id: typeof o.id === 'string' ? o.id : null,
+      at: typeof o.at === 'number' && Number.isFinite(o.at) ? o.at : 0,
+    }
+  } catch {
+    return { scene, id: null, at: 0 }
+  }
+}
+
+/** the draft has been folded into the library; the crash net starts over */
+export function clearDraft(): void {
+  try {
+    window.localStorage.removeItem(DRAFT_KEY)
+  } catch {
+    // nothing to do
+  }
+}
+
+/** the legacy autosave slot, kept under its own name once migrated */
+export const LEGACY_SCENE_KEY = KEY
+
+export function readLegacyScene(): Scene | null {
+  return loadScene()
+}
+
+/**
+ * Mark the legacy slot as migrated by COPYING it aside, not by deleting it.
+ * If the migration turns out to have gone wrong, the coach's only copy of
+ * that diagram is still on the disk where it always was.
+ */
+export function stampLegacyMigrated(): void {
+  try {
+    const raw = window.localStorage.getItem(KEY)
+    if (raw) window.localStorage.setItem(KEY + '.migrated', raw)
+  } catch {
+    // nothing to do
+  }
 }
 
 /** Write immediately - used when the tab is going away. */

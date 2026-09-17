@@ -20,6 +20,9 @@ import {
 } from './lib/exportImage'
 import { flushScene, saveScene } from './lib/storage'
 import { useStore } from './state/store'
+import { registerPreviewSource, useLibrary } from './state/library'
+import { startSync, syncNow } from './sync/engine'
+import { Library } from './ui/Library'
 import { useView } from './state/view'
 import { useIsMobile } from './ui/useMedia'
 import { STAMP_SVG } from './brand/assets'
@@ -34,17 +37,23 @@ import './ui/styles.css'
  */
 const EXPORT_BASE_PX = 1600
 
+/** the long side of a library thumbnail, in pixels */
+const THUMB_PX = 420
+
 export function App() {
   const stageRef = useRef<Konva.Stage | null>(null)
   const [toast, setToast] = useState<{ text: string; error: boolean } | null>(null)
+  const [libraryOpen, setLibraryOpen] = useState(false)
 
-  /* autosave: every change, 500 ms after the last one, and on the way out */
+  /* autosave: every change, 500 ms after the last one, and on the way out.
+     This is the crash net, not the library: it is one synchronous write that
+     survives a killed tab, and the library takes its revisions on top of it. */
   useEffect(() => {
     let last = useStore.getState().scene
     const unsub = useStore.subscribe((s) => {
       if (s.scene !== last) {
         last = s.scene
-        saveScene(s.scene)
+        saveScene(s.scene, useLibrary.getState().currentId)
       }
     })
     const flush = () => flushScene()
@@ -70,6 +79,24 @@ export function App() {
     preloadSvgImages([STAMP_SVG])
   }, [])
 
+  /* open the library, then keep it in step with the server */
+  useEffect(() => {
+    let stop: (() => void) | null = null
+    void useLibrary
+      .getState()
+      .hydrate()
+      .then(() => {
+        stop = startSync()
+      })
+    const commit = () => void useLibrary.getState().commitNow()
+    // a phone backgrounding the tab is the usual way an edit session ends
+    document.addEventListener('visibilitychange', commit)
+    return () => {
+      stop?.()
+      document.removeEventListener('visibilitychange', commit)
+    }
+  }, [])
+
   /** drop the selection and the zoom, and give React two frames to redraw */
   const settle = useCallback(async () => {
     useStore.getState().select(null)
@@ -79,6 +106,20 @@ export function App() {
 
   const pixelRatioFor = (stage: Konva.Stage, scale: number) =>
     (EXPORT_BASE_PX / Math.max(stage.width(), stage.height(), 1)) * scale
+
+  /* the library's thumbnails come from the live canvas, at the moments the
+     coach is stepping away from it - settle() resets the zoom, so this must
+     not run while they are drawing */
+  useEffect(() => {
+    registerPreviewSource(async () => {
+      const stage = stageRef.current
+      if (!stage) return null
+      await settle()
+      const ratio = THUMB_PX / Math.max(stage.width(), stage.height(), 1)
+      return stage.toDataURL({ pixelRatio: ratio, mimeType: 'image/jpeg', quality: 0.72 })
+    })
+    return () => registerPreviewSource(null)
+  }, [settle])
 
   const handleExport = useCallback(
     async (scale: number, format: ExportFormat) => {
@@ -121,7 +162,13 @@ export function App() {
   if (mobile) {
     return (
       <>
-        <MobileShell stageRef={stageRef} onExport={handleExport} onCopy={handleCopy} />
+        <MobileShell
+          stageRef={stageRef}
+          onExport={handleExport}
+          onCopy={handleCopy}
+          onOpenLibrary={() => setLibraryOpen(true)}
+        />
+        {libraryOpen && <Library onClose={() => { setLibraryOpen(false); syncNow() }} />}
         {toast && (
           <div className={toast.error ? 'toast toast--error' : 'toast'} role="status" onClick={() => setToast(null)}>
             {toast.text}
@@ -133,7 +180,7 @@ export function App() {
 
   return (
     <div className="app">
-      <Toolbar onExport={handleExport} onCopy={handleCopy} />
+      <Toolbar onExport={handleExport} onCopy={handleCopy} onOpenLibrary={() => setLibraryOpen(true)} />
       <main className="stage-wrap">
         <TitleField />
         <SceneStage stageRef={stageRef} />
@@ -142,6 +189,7 @@ export function App() {
         <Properties />
         <TextEditor />
       </main>
+      {libraryOpen && <Library onClose={() => { setLibraryOpen(false); syncNow() }} />}
       {toast && (
         <div className={toast.error ? 'toast toast--error' : 'toast'} role="status" onClick={() => setToast(null)}>
           {toast.text}
