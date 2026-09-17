@@ -235,67 +235,82 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     lastProblem: null,
 
     hydrate: async () => {
-      await initClock()
-      await deviceId()
-      const durable = await isDurable()
-      set({ durable })
+      try {
+        await initClock()
+        await deviceId()
+        const durable = await isDurable()
+        set({ durable })
 
-      // whatever the coach was drawing is already on screen; note it now, so
-      // a change made while the database opens is seen as a change
-      const bootScene = useStore.getState().scene
-      let touched = false
-      const unsub = useStore.subscribe((s) => {
-        if (s.scene !== bootScene) touched = true
-      })
+        // whatever the coach was drawing is already on screen; note it now, so
+        // a change made while the database opens is seen as a change
+        const bootScene = useStore.getState().scene
+        let touched = false
+        const unsub = useStore.subscribe((s) => {
+          if (s.scene !== bootScene) touched = true
+        })
 
-      const draft = loadDraft()
-      let items = await listMeta()
-      let opened: string | null = null
+        const draft = loadDraft()
+        let items = await listMeta()
+        let opened: string | null = null
 
-      if (draft?.id && items.some((m) => m.id === draft.id)) {
-        // the crash net belongs to a known record: it is at least as new as
-        // the record, because it was written after the last commit
-        opened = draft.id
-        set({ currentId: opened })
-        setDraftOwner(opened)
-        lastCommitted = null
-        await commitNow()
-      } else if (draft && !draft.id && hasContent(draft.scene)) {
-        // a library from before this version, or an exercise never saved:
-        // it becomes the first record instead of being thrown away
-        const meta = await adoptDraftOnce(draft.scene, titleOf(draft.scene))
-        stampLegacyMigrated()
-        if (meta) {
-          opened = meta.id
-          lastCommitted = JSON.stringify(draft.scene)
+        if (draft?.id && items.some((m) => m.id === draft.id)) {
+          // the crash net belongs to a known record: it is at least as new as
+          // the record, because it was written after the last commit
+          opened = draft.id
           set({ currentId: opened })
-        } else {
-          // another tab adopted it first; fall through to the usual choice
-          items = await listMeta()
+          setDraftOwner(opened)
+          lastCommitted = null
+          await commitNow()
+        } else if (draft && !draft.id && hasContent(draft.scene)) {
+          // a library from before this version, or an exercise never saved:
+          // it becomes the first record instead of being thrown away
+          const meta = await adoptDraftOnce(draft.scene, titleOf(draft.scene))
+          stampLegacyMigrated()
+          if (meta) {
+            opened = meta.id
+            lastCommitted = JSON.stringify(draft.scene)
+            set({ currentId: opened })
+          } else {
+            // another tab adopted it first; fall through to the usual choice
+            items = await listMeta()
+          }
+        } else if (draft && !draft.id) {
+          await markLegacyHandled()
         }
-      } else if (draft && !draft.id) {
-        await markLegacyHandled()
+
+        if (!opened) {
+          // read after the branches above, not before: one of them may have
+          // added a record, and another tab may have added it for us
+          const alive = items.filter((m) => m.deletedAt === null)
+          const want = (await lastOpenId()) ?? alive[0]?.id ?? null
+          const pick = alive.find((m) => m.id === want) ?? alive[0] ?? null
+          if (pick && !touched) {
+            await loadInto(pick.id)
+            opened = pick.id
+          } else if (pick) {
+            // the coach started drawing while we were opening the database:
+            // their work is the exercise now, and it gets its own record
+            set({ currentId: null })
+          }
+        }
+
+        unsub()
+      } catch (e) {
+        // A failure here used to be silent and total. The editor keeps
+        // working from its own autosave, so everything LOOKS saved, while
+        // the subscription that takes revisions and the engine that sends
+        // them are never reached: nothing goes to the server and nothing
+        // says why. Whatever went wrong above, everything after this catch
+        // still runs.
+        set({
+          lastProblem: `Библиотека на устройстве не открылась: ${
+            e instanceof Error ? e.message : String(e)
+          }. Упражнения на столе не пропадут, но на сервер могут не уходить.`,
+        })
       }
 
-      if (!opened) {
-        // read after the branches above, not before: one of them may have
-        // added a record, and another tab may have added it for us
-        const alive = items.filter((m) => m.deletedAt === null)
-        const want = (await lastOpenId()) ?? alive[0]?.id ?? null
-        const pick = alive.find((m) => m.id === want) ?? alive[0] ?? null
-        if (pick && !touched) {
-          await loadInto(pick.id)
-          opened = pick.id
-        } else if (pick) {
-          // the coach started drawing while we were opening the database:
-          // their work is the exercise now, and it gets its own record
-          set({ currentId: null })
-        }
-      }
-
-      unsub()
       set({ ready: true })
-      await refresh()
+      await refresh().catch(() => {})
 
       /* from here on the editor drives the library */
       // the editor's own autosave lives in App; here the library only notes

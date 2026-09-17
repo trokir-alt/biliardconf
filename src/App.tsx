@@ -90,6 +90,9 @@ export function App() {
     void useLibrary
       .getState()
       .hydrate()
+      // the engine starts even if opening the library went wrong: a device
+      // that cannot read its own database can still send what it draws now
+      .catch(() => {})
       .then(() => {
         stop = startSync()
       })

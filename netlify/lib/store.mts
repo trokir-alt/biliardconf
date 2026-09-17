@@ -27,12 +27,12 @@ type NetlifyGlobal = {
 }
 
 /**
- * Which deploy context this is.
+ * Which deploy context this is, or '' when nothing says.
  *
- * The CONTEXT environment variable first, and that order matters: the
- * request context is null in a scheduled function, so reading it alone would
- * send the nightly snapshot and sweep to a deploy-scoped store while the
- * library lives in the site-wide one - a job that quietly works on nothing.
+ * Measured on the live site through /api/health: CONTEXT is NOT set in the
+ * function runtime (it is a build variable), and the request context carries
+ * it instead. A scheduled function has no request, so for the nightly job
+ * BOTH are empty.
  */
 function deployContext(): string {
   const g = (globalThis as { Netlify?: NetlifyGlobal }).Netlify
@@ -41,7 +41,22 @@ function deployContext(): string {
 
 export function openStore() {
   const options = { name: STORE_NAME, consistency: 'strong' as const, region: REGION }
-  return deployContext() === 'production' ? getStore(options) : getDeployStore(options)
+  const context = deployContext()
+  /**
+   * Unknown context means the SITE-WIDE store, not the deploy one.
+   *
+   * The deploy store is a fresh empty store per release, which is right for a
+   * preview and catastrophic for the library. The one place the context is
+   * unknowable is the scheduled job - it has no request - and that job runs
+   * only on published production deploys. Guessing "per-deploy" there meant
+   * the nightly snapshot photographed an empty store every night, and the
+   * coach's real library was never in any snapshot.
+   *
+   * A preview or branch deploy still identifies itself through its request
+   * context, so it keeps its own store as intended.
+   */
+  const isPreview = context !== '' && context !== 'production'
+  return isPreview ? getDeployStore(options) : getStore(options)
 }
 
 /**
@@ -59,7 +74,7 @@ export function storeScope() {
     context: context || '(none)',
     contextFromEnv: g?.env?.get?.('CONTEXT') ?? null,
     contextFromRequest: g?.context?.deploy?.context ?? null,
-    scope: context === 'production' ? 'site-wide' : 'per-deploy',
+    scope: context !== '' && context !== 'production' ? 'per-deploy' : 'site-wide',
     region: REGION,
     store: STORE_NAME,
   }

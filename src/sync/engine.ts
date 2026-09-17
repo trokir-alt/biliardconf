@@ -475,13 +475,19 @@ async function cycle(): Promise<void> {
   }
 }
 
+/** guards against the lock being granted after the fallback already started */
+let looping = false
+
 async function loop(signal: AbortSignal): Promise<void> {
+  if (looping) return
+  looping = true
   while (!signal.aborted) {
     wakeAsked = false
     await cycle()
     if (signal.aborted) return
     await sleep(nextDelay)
   }
+  looping = false
 }
 
 /**
@@ -497,13 +503,30 @@ export function startSync(): () => void {
   const ctl = new AbortController()
 
   const run = async () => {
-    if (typeof navigator !== 'undefined' && navigator.locks?.request) {
-      await navigator.locks.request('biliardconf.sync', { signal: ctl.signal }, async () => {
+    if (typeof navigator === 'undefined' || !navigator.locks?.request) {
+      await loop(ctl.signal)
+      return
+    }
+    /**
+     * One tab syncs, chosen by the lock. But the lock is a nicety - writes are
+     * per exercise and the conflict rules hold with two writers - while never
+     * getting it is fatal: the device then syncs nothing at all and says
+     * nothing about it. A second client that holds the lock and never lets go
+     * (another tab, the app on the home screen beside a browser tab) must not
+     * be able to silence this one. So: wait for the lock, and if it has not
+     * come in fifteen seconds, sync anyway. `looping` keeps the two paths from
+     * both running if the lock is granted later.
+     */
+    const held = navigator.locks
+      .request('biliardconf.sync', { signal: ctl.signal }, async () => {
         await loop(ctl.signal)
       })
-    } else {
-      await loop(ctl.signal)
-    }
+      .catch(() => {})
+    const fallback = setTimeout(() => {
+      if (!ctl.signal.aborted) void loop(ctl.signal)
+    }, 15_000)
+    await held
+    clearTimeout(fallback)
   }
   void run().catch(() => {
     // the lock was taken from us, or the tab is going away
