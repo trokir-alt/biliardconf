@@ -77,8 +77,37 @@ async function readJson<T>(res: Response): Promise<T> {
   try {
     return (await res.json()) as T
   } catch {
-    throw new Offline('bad answer')
+    // the content type is the whole diagnosis: text/html here means the
+    // request never reached the function and the app shell answered instead
+    throw new Offline(`not-json:${res.headers.get('content-type') ?? 'без типа'}`)
   }
+}
+
+/**
+ * Turn a failure into something the coach can act on.
+ *
+ * «Нет связи» is true but useless: it looks the same whether the hall's wifi
+ * is down, the server is throwing, or the API is answering with the app's own
+ * page. Those need different fixes, and only the last one is ours.
+ */
+function explain(reason: string): string {
+  if (reason === 'no network') {
+    return 'Сеть не отвечает. Работа сохраняется на устройстве и уйдёт, когда связь вернётся.'
+  }
+  if (reason.startsWith('not-json:')) {
+    return `Сервер ответил не данными, а «${reason.slice('not-json:'.length)}». Похоже, запрос к /api не доходит до функции — это поломка на стороне сайта, работа при этом цела.`
+  }
+  const m = /^(list|get|put|backup) (\d+)$/.exec(reason)
+  if (m) {
+    const what: Record<string, string> = {
+      list: 'списка изменений',
+      get: 'чтения упражнения',
+      put: 'записи упражнения',
+      backup: 'выгрузки',
+    }
+    return `Сервер ответил ${m[2]} на запрос ${what[m[1]] ?? m[1]}. Работа осталась на устройстве.`
+  }
+  return `Обмен не удался: ${reason}. Работа осталась на устройстве.`
 }
 
 /* ----------------------------------------------------------------- pull */
@@ -99,10 +128,32 @@ function heldByEditor(id: string): boolean {
 
 /** true while this device has never had a successful exchange */
 let firstConnection = true
+/** cleared once this run of the app has listed the library from the beginning */
+let reconciled = false
+
+/**
+ * How far back to look behind the cursor on every poll.
+ *
+ * The change feed is a listing, and a listing on Netlify Blobs is eventually
+ * consistent - a marker can take up to a minute to appear even when a read of
+ * the blob itself is strongly consistent. A cursor that only moves forward
+ * therefore has a hole in it: if device B lists while A's marker is still
+ * propagating, B's cursor advances past A's timestamp, and when A's marker
+ * finally appears it is already older than the cursor and is filtered out
+ * FOREVER. The exercise exists on the server and neither device ever sees it.
+ *
+ * The local stand could never catch this: its store is a Map, so a write is
+ * visible the instant it happens. Five minutes is five times the propagation
+ * the platform documents, and re-reading a few markers costs nothing.
+ */
+const CURSOR_OVERLAP_MS = 5 * 60_000
 
 async function pull(): Promise<boolean> {
-  const since = await loadCursor()
-  if (since > 0) firstConnection = false
+  const stored = await loadCursor()
+  if (stored > 0) firstConnection = false
+  // the first exchange after the app starts lists everything: whatever any
+  // hole swallowed comes back, so the library heals itself on the next visit
+  const since = reconciled ? Math.max(0, stored - CURSOR_OVERLAP_MS) : 0
   const started = Date.now()
   const res = await call(`/api/exercises?since=${since}`)
   if (!res.ok) throw new Offline(`list ${res.status}`)
@@ -143,7 +194,10 @@ async function pull(): Promise<boolean> {
     if (done.some(Boolean)) changed = true
   }
 
-  await saveCursor(body.cursor)
+  // never let the cursor run ahead of the stored one: a listing that came
+  // back short must not move the mark backwards either
+  await saveCursor(Math.max(stored, body.cursor))
+  reconciled = true
   if (changed) await useLibrary.getState().refresh()
   // a cut-short page means the rest is waiting and should not sit for 30 s
   return body.more
@@ -382,6 +436,7 @@ async function cycle(): Promise<void> {
     firstConnection = false
     while (more) more = await pull()
     lib.setSync('synced')
+    lib.noteProblem(null)
     cycles++
     await lib.refresh()
     // a change made while this pass ran is not made to wait half a minute
@@ -389,6 +444,7 @@ async function cycle(): Promise<void> {
   } catch (e) {
     if (!(e instanceof Offline)) throw e
     lib.setSync('offline')
+    lib.noteProblem(explain(e.message))
     cycles++
     nextDelay = Math.min(POLL_BACKOFF_MAX, Math.max(POLL_MS, nextDelay * 2))
   }

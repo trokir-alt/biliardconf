@@ -13,6 +13,23 @@
 
 const stores = new Map()
 
+/**
+ * Key fragments hidden from list() — the harness's way of reproducing the one
+ * thing this fake cannot have: a listing that lags behind the writes.
+ * On Netlify a marker can take up to a minute to show up in list() even
+ * though reading the blob itself is strongly consistent.
+ */
+let hiddenFromList = []
+
+/** harness only: make keys containing this fragment invisible to list() */
+export function __hideFromList(fragment) {
+  hiddenFromList.push(fragment)
+}
+
+export function __showAll() {
+  hiddenFromList = []
+}
+
 class FakeStore {
   constructor(name) {
     this.name = name
@@ -22,7 +39,9 @@ class FakeStore {
   async list({ prefix = '' } = {}) {
     const blobs = []
     for (const [key, row] of this.data) {
-      if (key.startsWith(prefix)) blobs.push({ key, etag: row.etag })
+      if (!key.startsWith(prefix)) continue
+      if (hiddenFromList.some((f) => key.includes(f))) continue
+      blobs.push({ key, etag: row.etag })
     }
     return { blobs, directories: [] }
   }
@@ -85,6 +104,7 @@ export function getDeployStore(options) {
 /** harness only: start from nothing between scenarios */
 export function __reset() {
   stores.clear()
+  hiddenFromList = []
 }
 
 /** harness only: what is in the store, for assertions */

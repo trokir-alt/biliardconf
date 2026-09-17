@@ -35,6 +35,9 @@ const browser = await chromium.launch(
 const post = (p) => fetch(`${API}${p}`, { method: 'POST' }).then((r) => r.json())
 const resetServer = () => post('/__test/reset')
 const runDaily = () => post('/__test/daily')
+/** make a key invisible to list(), the way a lagging listing does on Netlify */
+const hideFromList = (key) => post(`/__test/hide?key=${encodeURIComponent(key)}`)
+const showAll = () => post('/__test/show')
 
 /* ------------------------------------------------------------- a device */
 
@@ -533,6 +536,58 @@ async function volume() {
   await a.ctx.close()
 }
 
+/* ------------------------------ 9. a marker that shows up late in a listing */
+
+/**
+ * The failure that no in-memory stand can produce by itself.
+ *
+ * Netlify Blobs answers list() with eventual consistency: a marker can take up
+ * to a minute to appear even when reading the blob is strongly consistent. A
+ * cursor that only ever moves forward then has a hole - it advances past the
+ * late marker's timestamp, and when the marker finally appears it is already
+ * older than the cursor and is skipped for good. The exercise is on the
+ * server, and neither device ever shows it.
+ */
+async function lateMarker() {
+  await resetServer()
+  const a = await device('A')
+  const b = await device('B')
+
+  await draw(a, 'Написано первым')
+  await sync(a)
+  const id = (await lib(a)).items[0].id
+
+  // A's marker is still propagating as far as B can tell
+  await hideFromList(id)
+
+  await draw(b, 'Написано вторым')
+  // the first exchange pulls BEFORE it pushes, so B's own marker is not in
+  // that listing yet; it takes a second round for B's cursor to move past the
+  // hidden one, and that is exactly when the hole opens
+  await sync(b)
+  await sync(b)
+  const hidden = (await lib(b)).items.map((m) => m.title)
+  check('late marker: the second device does not see it while it propagates', !hidden.includes('Написано первым'), JSON.stringify(hidden))
+
+  // and now it lands - after B's cursor has already moved past it
+  await showAll()
+  await sync(b, 30000)
+  let seen = (await lib(b)).items.map((m) => m.title)
+  if (!seen.includes('Написано первым')) {
+    // the cursor overlap covers the documented propagation window; a full
+    // reconcile on the next app start is the backstop, so try that too
+    await b.page.reload({ waitUntil: 'load' })
+    await b.page.waitForFunction(() => window.__library?.getState().ready === true, null, { timeout: 20000 })
+    await sync(b, 30000)
+    seen = (await lib(b)).items.map((m) => m.title)
+  }
+  check('late marker: it arrives once the listing catches up', seen.includes('Написано первым'), JSON.stringify(seen))
+  check('late marker: nothing of the second device was lost', seen.includes('Написано вторым'), JSON.stringify(seen))
+
+  await a.ctx.close()
+  await b.ctx.close()
+}
+
 /* -------------------------------------------------------------- the run */
 
 await twoDevices()
@@ -543,6 +598,7 @@ await migration()
 await snapshots()
 await serverDown()
 await lostAnswer()
+await lateMarker()
 await volume()
 
 await browser.close()

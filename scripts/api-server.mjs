@@ -9,9 +9,10 @@
  *
  *   node --import ./scripts/blobs-register.mjs scripts/api-server.mjs
  *
- * Two extra endpoints exist only here and never ship: /__test/reset empties
- * the store between scenarios, and /__test/daily runs the scheduled job on
- * demand instead of waiting for 03:17.
+ * A few endpoints exist only here and never ship: /__test/reset empties the
+ * store between scenarios, /__test/daily runs the scheduled job on demand
+ * instead of waiting for 03:17, and /__test/hide makes a key invisible to
+ * list() so a run can reproduce a listing that lags behind its writes.
  */
 
 import { createServer } from 'node:http'
@@ -75,6 +76,8 @@ const server = createServer((req, res) => {
     if (url.pathname.startsWith('/__test/')) {
       const blobs = await import('./blobs-fake.mjs')
       if (url.pathname === '/__test/reset') blobs.__reset()
+      else if (url.pathname === '/__test/hide') blobs.__hideFromList(url.searchParams.get('key') ?? '')
+      else if (url.pathname === '/__test/show') blobs.__showAll()
       else if (url.pathname === '/__test/daily') await daily?.()
       else if (url.pathname === '/__test/dump') {
         res.writeHead(200, { 'content-type': 'application/json' })
