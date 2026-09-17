@@ -43,19 +43,20 @@ const browser = await chromium.launch(
 )
 
 /**
- * Empty the local function stand before the run.
+ * Empty the local function stand.
  *
- * Since stage 6 the app syncs on boot, so a library left on the stand by an
- * earlier run turns up in every screen's list - which is correct behaviour and
- * useless as a starting point for a test. Without a stand there is nothing to
- * clear and the run simply works offline, which several checks want anyway.
- *
- * The three screens run in one process, in sequence, so this happens once.
+ * Since stage 6 the app syncs on boot, so a library left on the stand turns up
+ * in the next screen's list - correct behaviour, useless as a starting point.
+ * The screens run in sequence, so clearing before each one gives every screen
+ * the same empty library. Without a stand there is nothing to clear and the
+ * run simply works offline, which several checks want anyway.
  */
-try {
-  await fetch(`${process.env.API_BASE || 'http://127.0.0.1:4181'}/__test/reset`, { method: 'POST' })
-} catch {
-  // no stand on this machine: the app will report "no connection" and go on
+async function resetStand() {
+  try {
+    await fetch(`${process.env.API_BASE || 'http://127.0.0.1:4181'}/__test/reset`, { method: 'POST' })
+  } catch {
+    // no stand on this machine: the app reports "no connection" and goes on
+  }
 }
 
 /* ------------------------------------------------------------- helpers */
@@ -96,6 +97,7 @@ async function gesture(page, from, to, steps = 18) {
 const tool = (page, name) => page.getByRole('button', { name, exact: true }).click()
 
 async function newPage(viewport, dsf, opts = {}) {
+  await resetStand()
   const ctx = await browser.newContext({
     viewport,
     deviceScaleFactor: dsf,
@@ -1205,10 +1207,20 @@ async function stage6(page, label) {
   const badge = (await L.locator('.sync').first().innerText()).trim()
   check(`${label}: the list says whether the work reached the server`, ['Синхронизировано', 'Есть несохранённое', 'Нет связи'].includes(badge), badge)
 
-  // a thumbnail, or an honest object count where there is none yet
-  const card = L.locator('.lib-card').first()
-  const hasThumb = (await card.locator('img.lib-card__thumb').count()) > 0
-  check(`${label}: a card shows a picture or its object count`, hasThumb || (await card.locator('.lib-card__thumb--empty').count()) > 0, hasThumb ? 'thumbnail' : 'count only')
+  // a thumbnail, or an honest object count where there is none yet - and
+  // never nothing. Both are read in one pass: a sync landing between two
+  // queries would reorder the list and make the check lie either way.
+  const thumb = await L.locator('.lib-card')
+    .first()
+    .evaluate((el) => ({
+      image: !!el.querySelector('img.lib-card__thumb'),
+      placeholder: !!el.querySelector('.lib-card__thumb--empty'),
+    }))
+  check(
+    `${label}: a card shows a picture or its object count`,
+    thumb.image || thumb.placeholder,
+    thumb.image ? 'thumbnail' : thumb.placeholder ? 'count only' : 'nothing',
+  )
 
   const before = (await titles()).length
   await card.getByRole('button', { name: 'Дублировать' }).click()
