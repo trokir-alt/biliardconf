@@ -63,6 +63,8 @@ export type LibraryState = {
   uploaded: number | null
   /** set when a conflict left a second copy, so the interface can say so */
   lastConflict: string | null
+  /** something the server refused and the engine cannot fix by retrying */
+  lastProblem: string | null
 
   hydrate: () => Promise<void>
   refresh: () => Promise<void>
@@ -85,6 +87,7 @@ export type LibraryState = {
   setSync: (s: SyncState) => void
   noteUploaded: (n: number) => void
   noteConflict: (title: string | null) => void
+  noteProblem: (text: string | null) => void
 }
 
 const emptyScene = (): Scene => {
@@ -229,6 +232,7 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     sync: 'pending',
     uploaded: null,
     lastConflict: null,
+    lastProblem: null,
 
     hydrate: async () => {
       await initClock()
@@ -385,6 +389,7 @@ export const useLibrary = create<LibraryState>()((set, get) => {
     setSync: (s) => set({ sync: s }),
     noteUploaded: (n) => set({ uploaded: n }),
     noteConflict: (title) => set({ lastConflict: title }),
+    noteProblem: (text) => set({ lastProblem: text }),
   }
 })
 

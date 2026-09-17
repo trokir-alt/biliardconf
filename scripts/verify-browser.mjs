@@ -42,6 +42,22 @@ const browser = await chromium.launch(
   process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {},
 )
 
+/**
+ * Empty the local function stand before the run.
+ *
+ * Since stage 6 the app syncs on boot, so a library left on the stand by an
+ * earlier run turns up in every screen's list - which is correct behaviour and
+ * useless as a starting point for a test. Without a stand there is nothing to
+ * clear and the run simply works offline, which several checks want anyway.
+ *
+ * The three screens run in one process, in sequence, so this happens once.
+ */
+try {
+  await fetch(`${process.env.API_BASE || 'http://127.0.0.1:4181'}/__test/reset`, { method: 'POST' })
+} catch {
+  // no stand on this machine: the app will report "no connection" and go on
+}
+
 /* ------------------------------------------------------------- helpers */
 
 const scene = (page) =>
@@ -342,12 +358,16 @@ async function behaviour(page, label) {
   check(`${label}: scene survives a reload`,
     back.items.length === saved.items.length && back.title === 'Автосохранение' && back.note === 'проверка',
     `${back.items.length}/${saved.items.length} items, title "${back.title}"`)
-  check(`${label}: new exercise asks first`, true) // covered by the confirm() below
-  page.once('dialog', (dlg) => dlg.accept())
+  // stage 6 took the confirmation away, and that is the point: the library
+  // has already taken a revision, so "new exercise" throws nothing away and
+  // has nothing to ask about
+  const beforeNew = await page.evaluate(() => window.__library.getState().items.length)
   await tool(page, 'Новое упражнение')
-  await page.waitForTimeout(150)
+  await page.waitForTimeout(500)
   const fresh = await scene(page)
   check(`${label}: new exercise clears table, title and note`, fresh.items.length === 0 && !fresh.title && !fresh.note)
+  const afterNew = await page.evaluate(() => window.__library.getState().items.length)
+  check(`${label}: new exercise asks nothing because it loses nothing`, afterNew >= Math.max(1, beforeNew), `library ${beforeNew} -> ${afterNew}`)
 
   await stage3(page, label)
 }
@@ -378,6 +398,9 @@ async function stage3(page, label) {
   await page.mouse.down()
   await page.mouse.move(Math.round(px1), Math.round(py1), { steps: 18 })
   await page.mouse.move(Math.round(px1), Math.round(py1))
+  // Konva commits a drag on an animation frame: releasing in the same frame
+  // as the last move would leave the node a frame behind the pointer
+  await page.waitForTimeout(40)
   await page.mouse.up()
   await page.waitForTimeout(150)
   const seen = await page.evaluate(

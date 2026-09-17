@@ -60,6 +60,8 @@ export function Library({ onClose }: { onClose: () => void }) {
   const currentId = useLibrary((s) => s.currentId)
   const uploaded = useLibrary((s) => s.uploaded)
   const durable = useLibrary((s) => s.durable)
+  const lastProblem = useLibrary((s) => s.lastProblem)
+  const lastConflict = useLibrary((s) => s.lastConflict)
   const commitNow = useLibrary((s) => s.commitNow)
   const open = useLibrary((s) => s.open)
   const createNew = useLibrary((s) => s.createNew)
@@ -141,6 +143,12 @@ export function Library({ onClose }: { onClose: () => void }) {
         <p className="library__warn">
           Браузер не дал сохранить библиотеку на устройстве. Упражнения уйдут на сервер, но локально не переживут
           закрытие вкладки.
+        </p>
+      )}
+      {lastProblem && <p className="library__warn">{lastProblem}</p>}
+      {lastConflict && (
+        <p className="library__note">
+          Это упражнение правили на двух устройствах. Обе версии на месте, вторая лежит рядом как «{lastConflict}».
         </p>
       )}
       {uploaded !== null && uploaded > 0 && (

@@ -222,8 +222,12 @@ async function push(): Promise<number> {
       continue
     }
     if (res.status === 413) {
-      // nothing the engine can do; leave it dirty and visible rather than
-      // retry it forever in the background
+      // retrying will not make the diagram smaller. It stays dirty, which is
+      // right - the work is here - but the coach has to be told why, or the
+      // header says "not sent" forever with no reason given.
+      useLibrary
+        .getState()
+        .noteProblem(`«${m.title}» слишком большое для сервера и осталось только на этом устройстве.`)
       continue
     }
     throw new Offline(`put ${res.status}`)
