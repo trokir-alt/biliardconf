@@ -1388,11 +1388,304 @@ async function stage6(page, label) {
   await page.waitForTimeout(200)
 }
 
+/* ------------------------------------------------ American pool (stage 7) */
+
+/**
+ * Read the composite of every Konva layer - what the eye sees - and measure
+ * inside the page, in table millimetres. `probe` is the body of a function
+ * given `at(mx, my)` -> [r, g, b, a] | null, `luma(c)`, the scene and the
+ * table geometry the app publishes; whatever it returns comes back here.
+ */
+async function measure(page, probe) {
+  return page.evaluate((body) => {
+    const layers = [...document.querySelectorAll('.konvajs-content canvas')]
+    const canvas = document.createElement('canvas')
+    canvas.width = layers[0].width
+    canvas.height = layers[0].height
+    const g = canvas.getContext('2d')
+    for (const l of layers) g.drawImage(l, 0, 0)
+    const L = window.__layout
+    const W = canvas.width, H = canvas.height
+    const img = g.getImageData(0, 0, W, H).data
+    const dpr = W / parseFloat(layers[0].style.width)
+    const at = (mx, my) => {
+      const sx = L.rotation === 90 ? -my * L.scale + L.x : mx * L.scale + L.x
+      const sy = L.rotation === 90 ? mx * L.scale + L.y : my * L.scale + L.y
+      const x = Math.round(sx * dpr), y = Math.round(sy * dpr)
+      if (x < 0 || y < 0 || x >= W || y >= H) return null
+      const i = (y * W + x) * 4
+      return [img[i], img[i + 1], img[i + 2], img[i + 3]]
+    }
+    const luma = (c) => (c ? 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2] : 999)
+    const scene = window.__store.getState().scene
+    return new Function('at', 'luma', 'scene', body)(at, luma, scene)
+  }, probe)
+}
+
+/** a rack's balls, checked against its game's racking rule */
+function rackReport(sc) {
+  const balls = sc.items.filter((i) => i.type === 'ball')
+  const obj = balls.filter((b) => b.kind !== 'cue')
+  const cue = balls.filter((b) => b.kind === 'cue')
+  const D = sc.table.ballMm
+  let minGap = Infinity
+  for (let i = 0; i < balls.length; i++)
+    for (let j = i + 1; j < balls.length; j++)
+      minGap = Math.min(minGap, Math.hypot(balls[i].x - balls[j].x, balls[i].y - balls[j].y))
+  // "the centre of the rack" in every racking rule is the middle ball of the
+  // third row - not the ball nearest the centroid, which in a fifteen-ball
+  // triangle sits in the fourth row
+  const rows = []
+  for (const b of obj.slice().sort((p, q) => p.x - q.x)) {
+    const row = rows.find((r) => Math.abs(r[0].x - b.x) < 1)
+    if (row) row.push(b)
+    else rows.push([b])
+  }
+  const third = (rows[2] ?? []).slice().sort((p, q) => p.y - q.y)
+  const middle = third.length % 2 === 1 ? third[(third.length - 1) / 2] : null
+  const apex = obj.slice().sort((a, b) => a.x - b.x)[0]
+  const maxX = Math.max(...obj.map((b) => b.x))
+  const back = obj.filter((b) => Math.abs(b.x - maxX) < 0.5).sort((a, b) => a.y - b.y)
+  return {
+    count: obj.length,
+    cues: cue.length,
+    numbers: obj.map((b) => b.number).sort((a, b) => a - b),
+    minGap,
+    D,
+    centre: middle?.number,
+    apex,
+    backCorners: back.length ? [back[0].number, back[back.length - 1].number] : [],
+    cue: cue[0],
+  }
+}
+
+async function pool(page, label) {
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.newExercise()
+    // something of every kind that carries a size, placed on the pyramid
+    // table so the move to pool has something to carry across
+    st.addBall('white', { x: 1775, y: 887.5 })
+    st.addItem({ id: 'pa', type: 'arrow', points: [{ x: 600, y: 400 }, { x: 1400, y: 400 }], style: 'solid', color: '#FFFFFF', width: 14, head: 'end', curved: false })
+    st.addItem({ id: 'pt', type: 'text', x: 600, y: 1300, text: 'Пул', size: 90, color: '#FFFFFF', angle: 0 })
+    st.addItem({ id: 'ps', type: 'strikePoint', x: 2600, y: 1300, sizeMm: 300, dot: { u: 0, v: 0 } }, 'belowText')
+    st.select(null)
+  })
+  const before = await scene(page)
+
+  // ---- the game is chosen in the interface, and it is one undo ----
+  if (await page.locator('.m-shell').count()) {
+    await page.getByRole('button', { name: 'Меню', exact: true }).click()
+    await page.getByRole('button', { name: 'Пул', exact: true }).click()
+    // the cross in the sheet's head: the backdrop's centre is under the sheet
+    await page.locator('.sheet__head').getByRole('button', { name: 'Закрыть' }).click()
+  } else {
+    await page.getByRole('button', { name: 'Пул', exact: true }).click()
+  }
+  await page.waitForTimeout(300)
+  let sc = await scene(page)
+  check(`${label}: pool is a 9-foot table, 2540 x 1270, with 57.15 mm balls`,
+    sc.table.game === 'pool' && sc.table.lengthMm === 2540 && sc.table.widthMm === 1270 && sc.table.ballMm === 57.15,
+    JSON.stringify(sc.table))
+
+  // ---- the exercise came with it, in proportion ----
+  const ball = sc.items.find((i) => i.type === 'ball')
+  check(`${label}: a ball at the centre of the pyramid is at the centre of the pool table`,
+    Math.abs(ball.x - 1270) < 0.01 && Math.abs(ball.y - 635) < 0.01, `${ball.x.toFixed(1)}, ${ball.y.toFixed(1)}`)
+  check(`${label}: an object ball taken to pool gets a number`, ball.number === 1, `number ${ball.number}`)
+  const arrow = sc.items.find((i) => i.id === 'pa')
+  const text = sc.items.find((i) => i.id === 'pt')
+  const strike = sc.items.find((i) => i.id === 'ps')
+  check(`${label}: a medium arrow stays the medium preset`, arrow.width === 10, `${arrow.width} mm`)
+  check(`${label}: a medium caption stays the medium preset`, text.size === 64, `${text.size} mm`)
+  check(`${label}: the strike ball keeps its place on the size scale`, strike.sizeMm === 215, `${strike.sizeMm} mm`)
+  check(`${label}: no ball-size choice on a pool table`, (await page.locator('#ball-mm, #m-ball-mm').count()) === 0)
+
+  await page.evaluate(() => window.__store.getState().undo())
+  await page.waitForTimeout(150)
+  const undone = await scene(page)
+  check(`${label}: one undo puts the pyramid table and everything on it back`,
+    JSON.stringify(undone) === JSON.stringify(before), `${undone.table.lengthMm} mm, ${undone.items.length} items`)
+  await page.evaluate(() => window.__store.getState().redo())
+  await page.waitForTimeout(150)
+
+  // ---- the tools say what they make on this table ----
+  const toolNames = await page.getByRole('button').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label') || e.textContent.trim()))
+  check(`${label}: the ball tool is the numbered ball on pool`, toolNames.some((n) => n.includes('Номерной шар')) && !toolNames.some((n) => n === 'Белый шар'))
+
+  // ---- the three racks ----
+  const rackVia = async (name) => {
+    if (await page.locator('.m-shell').count()) await page.getByRole('button', { name: 'Меню', exact: true }).click()
+    await page.getByRole('button', { name, exact: true }).click()
+    await page.waitForTimeout(250)
+    return rackReport(await scene(page))
+  }
+  const L = 2540, W = 1270
+  const r8 = await rackVia('Восьмёрка')
+  const all15 = r8.numbers.join(',') === '1,2,3,4,5,6,7,8,9,10,11,12,13,14,15'
+  check(`${label}: eight-ball racks the fifteen, each once, and a white cue ball`, r8.count === 15 && all15 && r8.cues === 1, r8.numbers.join(','))
+  check(`${label}: eight-ball: the 8 in the centre of the rack`, r8.centre === 8, `centre ${r8.centre}`)
+  check(`${label}: eight-ball: a solid and a stripe in the back corners`,
+    r8.backCorners.length === 2 && (r8.backCorners[0] <= 8) !== (r8.backCorners[1] <= 8), r8.backCorners.join(' / '))
+  check(`${label}: eight-ball: the apex on the foot spot`, Math.abs(r8.apex.x - L * 0.75) < 0.5 && Math.abs(r8.apex.y - W / 2) < 0.5)
+  check(`${label}: eight-ball: no two balls overlap`, r8.minGap >= r8.D - 0.01, `min ${r8.minGap.toFixed(2)} mm`)
+  check(`${label}: the cue ball is in the kitchen`, r8.cue && r8.cue.x < L / 4, r8.cue && `${r8.cue.x.toFixed(0)} mm`)
+  const r9 = await rackVia('Девятка')
+  check(`${label}: nine-ball: nine, the 1 at the apex, the 9 in the centre`,
+    r9.count === 9 && r9.apex.number === 1 && r9.centre === 9 && r9.minGap >= r9.D - 0.01, `${r9.count}, apex ${r9.apex.number}, centre ${r9.centre}`)
+  const r10 = await rackVia('Десятка')
+  check(`${label}: ten-ball: ten, the 1 at the apex, no overlap`,
+    r10.count === 10 && r10.apex.number === 1 && r10.minGap >= r10.D - 0.01, `${r10.count}, apex ${r10.apex.number}`)
+  check(`${label}: a rack keeps the drawing`, (await scene(page)).items.some((i) => i.id === 'pa'))
+
+  // ---- a new ball takes the lowest free number ----
+  await page.evaluate(() => window.__store.getState().addBall('white', { x: 700, y: 300 }))
+  sc = await scene(page)
+  const added = sc.items[sc.items.length - 1]
+  check(`${label}: a new ball takes the lowest number not on the table`, added.number === 11, `number ${added.number}`)
+
+  // ---- the picker: which of the fifteen, or the cue ball ----
+  await page.evaluate((id) => window.__store.getState().select(id), added.id)
+  await page.waitForTimeout(250)
+  const picker = await page.locator('.ballpick').boundingBox()
+  const vp = page.viewportSize()
+  check(`${label}: the ball picker is entirely on screen`,
+    !!picker && picker.x >= 0 && picker.y >= 0 && picker.x + picker.width <= vp.width + 0.5 && picker.y + picker.height <= vp.height + 0.5,
+    picker && `${picker.x.toFixed(0)}..${(picker.x + picker.width).toFixed(0)} of ${vp.width}`)
+  const pick = page.locator('.ballpick')
+  await pick.getByRole('button', { name: 'Шар 5', exact: true }).click()
+  await page.waitForTimeout(150)
+  let picked = (await scene(page)).items.find((i) => i.id === added.id)
+  check(`${label}: picking 5 makes it the 5`, picked.number === 5 && picked.kind !== 'cue')
+  await pick.getByRole('button', { name: 'Биток', exact: true }).click()
+  await page.waitForTimeout(150)
+  picked = (await scene(page)).items.find((i) => i.id === added.id)
+  check(`${label}: picking the cue ball makes it the cue ball`, picked.kind === 'cue')
+  await page.evaluate(() => window.__store.getState().undo())
+  await page.waitForTimeout(100)
+  picked = (await scene(page)).items.find((i) => i.id === added.id)
+  check(`${label}: and that is one undo`, picked.kind !== 'cue' && picked.number === 5)
+
+  // ---- the picture: the balls, and the pockets ----
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.select(null)
+    st.setTool('select')
+    // three balls laid out clear of everything, to be read pixel by pixel
+    st.rackPool(9)
+    const sc = window.__store.getState().scene
+    const id = (n) => sc.items.find((i) => i.number === n).id
+    st.updateItem(id(3), { x: 900, y: 300 })
+    st.updateItem(id(8), { x: 900, y: 1000 })
+    const eleven = { id: 'p11', type: 'ball', x: 1500, y: 300, kind: 'white', number: 11 }
+    st.addItem(eleven)
+    st.select(null)
+  })
+  await page.waitForTimeout(400)
+  const px = await measure(page, `
+    const D = scene.table.ballMm, r = D / 2
+    const b = (n) => scene.items.find((i) => i.type === 'ball' && i.number === n && i.kind !== 'cue')
+    const cue = scene.items.find((i) => i.type === 'ball' && i.kind === 'cue')
+    const three = b(3), eight = b(8), eleven = scene.items.find((i) => i.id === 'p11')
+    // the body, clear of the disc (0.5 r), the lamp's highlight (upper left)
+    // and the rim: lower right, 0.7 r out
+    const body = (it) => at(it.x + r * 0.5, it.y + r * 0.5)
+    // inside the disc (0.5 r) but left of the digit, and below the highlight
+    const disc = (it) => at(it.x - r * 0.4, it.y + r * 0.05)
+    const out = { three: body(three), threeDisc: disc(three), eight: body(eight), cue: body(cue),
+      // in the band (half height 0.52 r) and clear of the disc
+      elevenBand: at(eleven.x + r * 0.58, eleven.y - r * 0.2), elevenCap: at(eleven.x + r * 0.15, eleven.y + r * 0.78) }
+
+    // pockets: in front of every mouth is cloth, behind the shelf is black,
+    // and the black across the opening is a funnel no wider than the mouth
+    const L = scene.table.lengthMm, WID = scene.table.widthMm
+    // a corner mouth runs between noses 114 / sqrt 2 from the corner, so its
+    // midpoint is half that along each rail
+    const a = 114 / Math.SQRT2 / 2
+    const pockets = [
+      { m: [a, a], out: [-Math.SQRT1_2, -Math.SQRT1_2], mouth: 114 },
+      { m: [L / 2, 0], out: [0, -1], mouth: 127 },
+      { m: [L - a, WID - a], out: [Math.SQRT1_2, Math.SQRT1_2], mouth: 114 },
+      { m: [L / 2, WID], out: [0, 1], mouth: 127 },
+    ]
+    out.pockets = pockets.map((p) => {
+      const pt = (d, s) => [p.m[0] + p.out[0] * d - p.out[1] * s, p.m[1] + p.out[1] * d + p.out[0] * s]
+      const front = luma(at(...pt(-6, 0)))
+      const deep = luma(at(...pt(30, 0)))
+      // the widest dark run across the opening, just behind the shelf. The
+      // drop is 0-20 in luma and the shaded back of the rubber beside it 30
+      // and up, so 25 tells them apart; at 40 the two merged into one run
+      let best = 0, cur = 0
+      for (let s = -p.mouth; s <= p.mouth; s += 0.5) {
+        const c = at(...pt(22, s))
+        if (c && luma(c) < 25) { cur += 0.5; best = Math.max(best, cur) } else cur = 0
+      }
+      return { front, deep, run: best, mouth: p.mouth }
+    })
+    return out
+  `)
+  // red by hue, not by brightness: the lamp darkens a ball towards its edge
+  const red = (c) => c && c[0] > 100 && c[0] > 2.5 * c[1] && c[0] > 2.5 * c[2]
+  const white = (c) => c && c[0] > 205 && c[1] > 205 && c[2] > 205
+  const black = (c) => c && Math.max(c[0], c[1], c[2]) < 60
+  check(`${label}: the 3 is a red ball`, red(px.three), JSON.stringify(px.three))
+  check(`${label}: with its number on a white disc`, white(px.threeDisc), JSON.stringify(px.threeDisc))
+  check(`${label}: the 8 is black`, black(px.eight), JSON.stringify(px.eight))
+  check(`${label}: the 11 is a red stripe on a white ball`, red(px.elevenBand) && white(px.elevenCap),
+    `${JSON.stringify(px.elevenBand)} / ${JSON.stringify(px.elevenCap)}`)
+  check(`${label}: the cue ball is white`, white(px.cue), JSON.stringify(px.cue))
+  px.pockets.forEach((p, i) => {
+    const kind = p.mouth === 114 ? 'corner' : 'side'
+    check(`${label}: pocket ${i + 1} (${kind}): cloth, not black, in front of the mouth`, p.front > 60, `luma ${p.front.toFixed(0)}`)
+    check(`${label}: pocket ${i + 1} (${kind}): black behind the shelf`, p.deep < 30, `luma ${p.deep.toFixed(0)}`)
+    check(`${label}: pocket ${i + 1} (${kind}): the opening narrows inside the mouth`, p.run > p.mouth * 0.6 && p.run < p.mouth, `${p.run.toFixed(1)} of ${p.mouth} mm`)
+  })
+
+  // ---- the table survives a reload, numbers and all ----
+  const numbersBefore = (await scene(page)).items.filter((i) => i.type === 'ball').map((b) => `${b.kind}:${b.number ?? ''}`).sort().join(',')
+  await page.waitForTimeout(700)
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.waitForFunction(() => window.__library?.getState().ready === true, null, { timeout: 20000 })
+  await page.waitForTimeout(500)
+  sc = await scene(page)
+  const numbersAfter = sc.items.filter((i) => i.type === 'ball').map((b) => `${b.kind}:${b.number ?? ''}`).sort().join(',')
+  check(`${label}: after a reload the table is still pool`, sc.table.game === 'pool', JSON.stringify(sc.table))
+  check(`${label}: and every ball keeps its number`, numbersAfter === numbersBefore)
+
+  // ---- to the pyramid and back: the numbers survive the round trip ----
+  await page.evaluate(() => window.__store.getState().setGame('pyramid'))
+  const onPyramid = await scene(page)
+  check(`${label}: back on the pyramid table the balls are its own again`,
+    onPyramid.table.game === undefined && onPyramid.table.lengthMm === 3550 && onPyramid.table.ballMm === 67)
+  await page.evaluate(() => window.__store.getState().setGame('pool'))
+  const again = (await scene(page)).items.filter((i) => i.type === 'ball').map((b) => `${b.kind}:${b.number ?? ''}`).sort().join(',')
+  check(`${label}: and on pool again every ball has the number it had`, again === numbersAfter)
+
+  // ---- the exported picture is the pool table ----
+  if (!(await page.locator('.m-shell').count())) {
+    const ex = await exportVia(page, `${label}-pool`, 'PNG', '1x')
+    // the outer table with its padding, 2540 + 2 x (165 + 56) by 1270 +
+    // 2 x (165 + 56), plus caption space - lying down or standing up, as the
+    // screen has it
+    const ratio = Math.max(ex.w, ex.h) / Math.min(ex.w, ex.h)
+    check(`${label}: a pool picture exports`, ex.bytes > 20000 && ratio > 1.3 && ratio < 1.9, `${ex.w}x${ex.h}, ${ex.bytes} bytes`)
+  }
+
+  // everything after this runs on the pyramid table it was written for
+  await page.evaluate(() => {
+    const st = window.__store.getState()
+    st.setGame('pyramid')
+    st.newExercise()
+  })
+  await page.waitForTimeout(200)
+}
+
 async function run(viewport, dsf, label, full) {
   const { ctx, page, errors } = await newPage(viewport, dsf)
   if (full) await behaviour(page, label)
   await picture(page, label)
   await stage6(page, label)
+  await pool(page, label)
 
   // clipboard: the button must produce an image/png item
   await page.evaluate(() => window.__store.getState().addBall('white', { x: 1000, y: 1000 }))
@@ -1646,6 +1939,8 @@ if (!ONLY || ONLY === 'phone') {
   await page.waitForTimeout(250)
   check('phone: pyramid from the menu sheet', (await scene(page)).items.filter((i) => i.type === 'ball').length >= 16)
   check('phone: the sheet closes after racking', (await page.locator('.sheet').count()) === 0)
+
+  await pool(page, 'phone')
 
   await stage6(page, 'phone')
 

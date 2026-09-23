@@ -724,6 +724,47 @@ async function withoutConditionalWrites() {
   await b.ctx.close()
 }
 
+/**
+ * A pool exercise travels like any other.
+ *
+ * The server never looks inside a scene, so this is about the two ends: the
+ * table's game and every ball's number have to survive the write on one
+ * device and the read on the other, not just the local autosave.
+ */
+async function poolTravels() {
+  await resetServer()
+  const a = await device('A')
+  const b = await device('B')
+
+  await a.page.evaluate(async () => {
+    await window.__library.getState().createNew()
+    const st = window.__store.getState()
+    st.setGame('pool')
+    st.setTitle('Девятка с разбоя')
+    st.rackPool(9)
+    await window.__library.getState().commitNow()
+  })
+  await sync(a)
+  await waitFor(b, 'Девятка с разбоя', 30000)
+  const got = await b.page.evaluate(async () => {
+    const lib = window.__library.getState()
+    const id = lib.items.find((m) => m.title === 'Девятка с разбоя').id
+    await lib.open(id)
+    const sc = window.__store.getState().scene
+    return {
+      game: sc.table.game,
+      length: sc.table.lengthMm,
+      numbers: sc.items.filter((i) => i.type === 'ball' && i.kind !== 'cue').map((i) => i.number).sort((x, y) => x - y).join(','),
+      cue: sc.items.filter((i) => i.type === 'ball' && i.kind === 'cue').length,
+    }
+  })
+  check('pool: the other device opens it on a pool table', got.game === 'pool' && got.length === 2540, JSON.stringify(got))
+  check('pool: with every ball numbered as it was racked', got.numbers === '1,2,3,4,5,6,7,8,9' && got.cue === 1, got.numbers)
+
+  await a.ctx.close()
+  await b.ctx.close()
+}
+
 /* -------------------------------------------------------------- the run */
 
 await twoDevices()
@@ -738,6 +779,7 @@ await lateMarker()
 await blindListing()
 await lostCatalogue()
 await withoutConditionalWrites()
+await poolTravels()
 await volume()
 
 await browser.close()

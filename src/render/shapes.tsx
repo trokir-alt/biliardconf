@@ -12,6 +12,7 @@ import type { Shape as KonvaShape } from 'konva/lib/Shape'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type {
   ArrowItem,
+  Game,
   GhostBallItem,
   GhostTrailItem,
   LineItem,
@@ -40,7 +41,7 @@ import {
 } from '../model/item'
 import { BRAND } from '../brand/assets'
 import { BRAND_FONT, CANVAS_FONT } from '../model/fonts'
-import { BALL } from '../model/theme'
+import { BALL, POOL_GENERIC } from '../model/theme'
 
 /** dashes scale with the stroke, so a thin dashed line never looks like a rash */
 const dashFor = (w: number, style: string): number[] | undefined =>
@@ -228,6 +229,13 @@ const PLATE_BOTTOM = '#0E2231'
 
 export type StrikePointProps = {
   item: StrikePointItem
+  /**
+   * Whose picture this is. The widget shows the struck ball in front and the
+   * object ball behind it, and the two games colour them the other way round:
+   * amber in front of white on the pyramid, white in front of the yellow
+   * 1-ball on pool.
+   */
+  game: Game
   /** px per mm, so the dot's grab area can be sized in screen pixels */
   scale: number
   /** live while dragging, final on release */
@@ -245,8 +253,14 @@ export type StrikePointProps = {
  * draggable node: dragging it moves only the dot, and its drag events are
  * stopped here so the widget underneath does not also start moving.
  */
-export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, onCompanionStart, magnet }: StrikePointProps) {
+/** the same modelling as a ball on the cloth, pulled a shade darker - see below */
+const WIDGET_WHITE = [0, '#FDFDFD', 0.34, '#EFF1F2', 0.8, '#DDE1E4', 1, '#B9BFC4']
+const WIDGET_AMBER = [0, '#FFD98A', 0.4, BALL.cue.base, 1, BALL.cue.shade]
+const WIDGET_YELLOW = [0, '#FFE27A', 0.34, POOL_GENERIC, 0.8, POOL_GENERIC, 1, '#9C7400']
+
+export function StrikePointShape({ item, game, scale, onDot, onDotStart, onCompanion, onCompanionStart, magnet }: StrikePointProps) {
   const r = item.sizeMm / 2
+  const pool = game === 'pool'
   // The object ball's centre in the host's own frame. Only x moves: both balls
   // stand on the cloth, so their centres are at the same height and one can
   // never be drawn above the other. How far out it sits IS the aim.
@@ -348,7 +362,7 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
             fillRadialGradientStartRadius={r * 0.06}
             fillRadialGradientEndPoint={{ x: r * 0.04, y: r * 0.06 }}
             fillRadialGradientEndRadius={r * 1.06}
-            fillRadialGradientColorStops={[0, '#FDFDFD', 0.34, '#EFF1F2', 0.8, '#DDE1E4', 1, '#B9BFC4']}
+            fillRadialGradientColorStops={pool ? WIDGET_YELLOW : WIDGET_WHITE}
             stroke="rgba(0,0,0,0.6)"
             strokeWidth={2}
           />
@@ -386,7 +400,7 @@ export function StrikePointShape({ item, scale, onDot, onDotStart, onCompanion, 
         fillRadialGradientStartRadius={r * 0.06}
         fillRadialGradientEndPoint={{ x: 0, y: 0 }}
         fillRadialGradientEndRadius={r * 1.06}
-        fillRadialGradientColorStops={[0, '#FFD98A', 0.4, BALL.cue.base, 1, BALL.cue.shade]}
+        fillRadialGradientColorStops={pool ? WIDGET_WHITE : WIDGET_AMBER}
         stroke="rgba(0,0,0,0.6)"
         strokeWidth={2}
       />

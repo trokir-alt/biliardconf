@@ -7,7 +7,8 @@
  * negative coordinates and beyond lengthMm / widthMm.
  */
 
-import type { TableConfig, Vec } from './types'
+import type { Game, TableConfig, Vec } from './types'
+import { gameOf } from './game'
 
 export const DEFAULT_TABLE: TableConfig = {
   lengthMm: 3550,
@@ -58,6 +59,93 @@ export const RIM_MM = 14
 /** rounding of the outer wooden frame */
 export const TABLE_CORNER_RADIUS_MM = 120
 
+/**
+ * Everything about a table that differs between the games. The constants
+ * above are the pyramid's own and stay exported under their old names.
+ */
+export type TableSpec = {
+  cushionMm: number
+  railMm: number
+  cornerMouthMm: number
+  middleMouthMm: number
+  /** see CORNER_JAW_MM: negative leans the jaw face towards the hole */
+  cornerJawMm: number
+  middleJawMm: number
+  cornerHoleRMm: number
+  middleHoleRMm: number
+  /**
+   * How far behind the mouth the drop begins. The pyramid's hole starts right
+   * at the noses; a pool table has a shelf of slate, covered in cloth, between
+   * the jaws before the hole - WPA: 1 to 2.25 in at a corner, up to 3/8 at a
+   * side.
+   */
+  cornerShelfMm: number
+  middleShelfMm: number
+  /** the ring round a hole: the pyramid's cream cup, or pool's black leather */
+  rimMm: number
+  pocketLook: 'cup' | 'leather'
+  /** round inlays, or the diamonds a pool table is named for */
+  sights: 'dot' | 'diamond'
+  /** where the middle pockets go in the draw order; see TableView */
+  middleOverCushions: boolean
+}
+
+/**
+ * Pool pockets, WPA. The mouth is measured between the cushion noses: 4.5 in
+ * at a corner, 5 in at a side. The faces are cut at a fixed angle to the nose
+ * line - 142 degrees at a corner, 104 at a side - so each face leans towards
+ * the hole, and the opening narrows with depth: the funnel that makes a pool
+ * pocket reject a ball hit at it too steeply. A face leaning (angle - 90)
+ * degrees off square travels cushion * tan(angle - 90) along the rail on its
+ * way to the back of the rubber.
+ */
+const POOL_CUSHION_MM = 50
+const leanMm = (facingDeg: number) => -POOL_CUSHION_MM * Math.tan(((facingDeg - 90) * Math.PI) / 180)
+
+export const TABLE_SPEC: Record<Game, TableSpec> = {
+  pyramid: {
+    cushionMm: CUSHION_MM,
+    railMm: RAIL_MM,
+    cornerMouthMm: CORNER_MOUTH_MM,
+    middleMouthMm: MIDDLE_MOUTH_MM,
+    cornerJawMm: CORNER_JAW_MM,
+    middleJawMm: MIDDLE_JAW_MM,
+    cornerHoleRMm: CORNER_HOLE_R_MM,
+    middleHoleRMm: MIDDLE_HOLE_R_MM,
+    cornerShelfMm: 0,
+    middleShelfMm: 0,
+    rimMm: RIM_MM,
+    pocketLook: 'cup',
+    sights: 'dot',
+    middleOverCushions: true,
+  },
+  pool: {
+    cushionMm: POOL_CUSHION_MM,
+    railMm: 115,
+    cornerMouthMm: 114,
+    middleMouthMm: 127,
+    cornerJawMm: leanMm(142),
+    middleJawMm: leanMm(104),
+    // unused: a pool hole is shaped by its jaws, see Pocket.drop
+    cornerHoleRMm: 0,
+    middleHoleRMm: 0,
+    // the low end of the WPA range: at the scale of a whole-table diagram a
+    // deeper shelf reads as a pocket that is closed, and the mouth is what
+    // the coach needs to see
+    cornerShelfMm: 14,
+    middleShelfMm: 4,
+    rimMm: 10,
+    pocketLook: 'leather',
+    sights: 'diamond',
+    // the side faces lean in, and the hole under them is what shows it
+    middleOverCushions: false,
+  },
+}
+
+export function tableSpec(cfg: { game?: unknown }): TableSpec {
+  return TABLE_SPEC[gameOf(cfg)]
+}
+
 export type PocketKind = 'corner' | 'middle'
 
 export type Pocket = {
@@ -78,8 +166,19 @@ export type Pocket = {
   jawBacks: [Vec, Vec]
   /** unit direction of each jaw face, nose -> back */
   jawDirs: [Vec, Vec]
-  /** the round hole: centre and radius; its chord through `jaws` is the mouth */
+  /**
+   * The round hole: centre and radius. On the pyramid its chord through `jaws`
+   * is the mouth; on pool it is the round back of `drop`.
+   */
   hole: { c: Vec; r: number }
+  /**
+   * A pool pocket's opening, seen from above: the black begins on a line
+   * `front` a shelf behind the mouth, runs back between the two jaw faces to
+   * the backs of the cushions, and closes in a half circle behind them. The
+   * faces lean in, so it is a funnel - which a circle stuck on the rail, the
+   * pyramid's shape, cannot draw: it bulged onto the bed in front of the mouth.
+   */
+  drop?: { front: [Vec, Vec]; backs: [Vec, Vec] }
 }
 
 /** flat [x0,y0,x1,y1,...] polygon in mm */
@@ -87,6 +186,8 @@ export type Polygon = number[]
 
 export type TableGeometry = {
   cfg: TableConfig
+  game: Game
+  spec: TableSpec
   /** play field size */
   lengthMm: number
   widthMm: number
@@ -100,10 +201,15 @@ export type TableGeometry = {
   cushions: Polygon[]
   /** diamond sights on the wooden rail */
   sights: Vec[]
-  /** transverse markings at 1/4, 1/2, 3/4 of the length */
+  /**
+   * Transverse markings, drawn and snapped to: 1/4, 1/2 and 3/4 of the length
+   * on a pyramid table, the head string alone on a pool one.
+   */
   crossLines: { from: Vec; to: Vec }[]
-  /** single longitudinal centre line */
+  /** single longitudinal centre line; always a snap axis */
   longLine: { from: Vec; to: Vec }
+  /** a pool table has no centre line on the cloth, only the spots on it */
+  drawLongLine: boolean
   /** front centre, table centre, back centre */
   spots: Vec[]
   /** x of the house line (1/4 of the length) */
@@ -117,13 +223,16 @@ const v = (x: number, y: number): Vec => ({ x, y })
  * renderer can memoise it on `cfg` alone.
  */
 export function buildGeometry(cfg: TableConfig): TableGeometry {
+  const game = gameOf(cfg)
+  const spec = TABLE_SPEC[game]
   const L = cfg.lengthMm
   const W = cfg.widthMm
-  const B = RAIL_BAND_MM
+  const B = spec.cushionMm + spec.railMm
+  const C = spec.cushionMm
 
   // half the mouth projected onto the rail it sits on
-  const cornerNose = CORNER_MOUTH_MM / Math.SQRT2 // 50.9 mm from the corner
-  const middleHalf = MIDDLE_MOUTH_MM / 2
+  const cornerNose = spec.cornerMouthMm / Math.SQRT2 // 50.9 mm from the corner on a pyramid
+  const middleHalf = spec.middleMouthMm / 2
 
   /**
    * A jaw: the cushion nose, plus where that cushion's cut face ends at the
@@ -133,8 +242,8 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
    */
   const jaw = (nose: Vec, railOut: Vec, away: Vec, jawMm: number) => {
     const back = v(
-      nose.x + railOut.x * CUSHION_MM + away.x * jawMm,
-      nose.y + railOut.y * CUSHION_MM + away.y * jawMm,
+      nose.x + railOut.x * C + away.x * jawMm,
+      nose.y + railOut.y * C + away.y * jawMm,
     )
     const len = Math.hypot(back.x - nose.x, back.y - nose.y)
     return { nose, back, dir: v((back.x - nose.x) / len, (back.y - nose.y) / len) }
@@ -144,8 +253,8 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
   const DOWN = v(0, 1)
   const LEFT = v(-1, 0)
   const RIGHT = v(1, 0)
-  const CJ = CORNER_JAW_MM
-  const MJ = MIDDLE_JAW_MM
+  const CJ = spec.cornerJawMm
+  const MJ = spec.middleJawMm
 
   const pocket = (
     id: string,
@@ -156,11 +265,36 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
     a: ReturnType<typeof jaw>,
     b: ReturnType<typeof jaw>,
   ): Pocket => {
-    // a circle of radius r through both noses: its centre is on the pocket's
-    // out-axis, sqrt(r^2 - (mouth/2)^2) behind the midpoint of the mouth chord
-    const r = kind === 'corner' ? CORNER_HOLE_R_MM : MIDDLE_HOLE_R_MM
     const mx = (a.nose.x + b.nose.x) / 2
     const my = (a.nose.y + b.nose.y) / 2
+    if (spec.pocketLook === 'leather') {
+      // each face, followed back to the shelf depth: the depth of a point is
+      // its distance behind the mouth along `out`, and a face gains
+      // dot(dir, out) of depth per millimetre of its length
+      const shelf = kind === 'corner' ? spec.cornerShelfMm : spec.middleShelfMm
+      const onFace = (j: ReturnType<typeof jaw>) => {
+        const t = shelf / (j.dir.x * out.x + j.dir.y * out.y)
+        return v(j.nose.x + j.dir.x * t, j.nose.y + j.dir.y * t)
+      }
+      // the backs are level with each other, so the half circle through them
+      // is centred between them
+      const c = v((a.back.x + b.back.x) / 2, (a.back.y + b.back.y) / 2)
+      return {
+        id,
+        kind,
+        at,
+        out,
+        mouthMm,
+        jaws: [a.nose, b.nose],
+        jawBacks: [a.back, b.back],
+        jawDirs: [a.dir, b.dir],
+        hole: { c, r: Math.hypot(a.back.x - c.x, a.back.y - c.y) },
+        drop: { front: [onFace(a), onFace(b)], backs: [a.back, b.back] },
+      }
+    }
+    // a circle of radius r through both noses: its centre is on the pocket's
+    // out-axis, sqrt(r^2 - (mouth/2)^2) behind the midpoint of the mouth chord
+    const r = kind === 'corner' ? spec.cornerHoleRMm : spec.middleHoleRMm
     const back = Math.sqrt(Math.max(0, r * r - (mouthMm / 2) * (mouthMm / 2)))
     return {
       id,
@@ -181,7 +315,7 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       'corner',
       v(0, 0),
       v(-Math.SQRT1_2, -Math.SQRT1_2),
-      CORNER_MOUTH_MM,
+      spec.cornerMouthMm,
       jaw(v(cornerNose, 0), UP, RIGHT, CJ),
       jaw(v(0, cornerNose), LEFT, DOWN, CJ),
     ),
@@ -190,7 +324,7 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       'middle',
       v(L / 2, 0),
       UP,
-      MIDDLE_MOUTH_MM,
+      spec.middleMouthMm,
       jaw(v(L / 2 - middleHalf, 0), UP, LEFT, MJ),
       jaw(v(L / 2 + middleHalf, 0), UP, RIGHT, MJ),
     ),
@@ -199,7 +333,7 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       'corner',
       v(L, 0),
       v(Math.SQRT1_2, -Math.SQRT1_2),
-      CORNER_MOUTH_MM,
+      spec.cornerMouthMm,
       jaw(v(L - cornerNose, 0), UP, LEFT, CJ),
       jaw(v(L, cornerNose), RIGHT, DOWN, CJ),
     ),
@@ -208,7 +342,7 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       'corner',
       v(0, W),
       v(-Math.SQRT1_2, Math.SQRT1_2),
-      CORNER_MOUTH_MM,
+      spec.cornerMouthMm,
       jaw(v(cornerNose, W), DOWN, RIGHT, CJ),
       jaw(v(0, W - cornerNose), LEFT, UP, CJ),
     ),
@@ -217,7 +351,7 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       'middle',
       v(L / 2, W),
       DOWN,
-      MIDDLE_MOUTH_MM,
+      spec.middleMouthMm,
       jaw(v(L / 2 - middleHalf, W), DOWN, LEFT, MJ),
       jaw(v(L / 2 + middleHalf, W), DOWN, RIGHT, MJ),
     ),
@@ -226,7 +360,7 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       'corner',
       v(L, W),
       v(Math.SQRT1_2, Math.SQRT1_2),
-      CORNER_MOUTH_MM,
+      spec.cornerMouthMm,
       jaw(v(L - cornerNose, W), DOWN, LEFT, CJ),
       jaw(v(L, W - cornerNose), RIGHT, UP, CJ),
     ),
@@ -251,28 +385,29 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
       a.y,
       b.x,
       b.y,
-      b.x - ux * jawB + ox * CUSHION_MM,
-      b.y - uy * jawB + oy * CUSHION_MM,
-      a.x + ux * jawA + ox * CUSHION_MM,
-      a.y + uy * jawA + oy * CUSHION_MM,
+      b.x - ux * jawB + ox * C,
+      b.y - uy * jawB + oy * C,
+      a.x + ux * jawA + ox * C,
+      a.y + uy * jawA + oy * C,
     ]
   }
 
   const cushions: Polygon[] = [
     // top rail, left half then right half (split by the middle pocket)
-    cushion(v(cornerNose, 0), v(L / 2 - middleHalf, 0), CORNER_JAW_MM, MIDDLE_JAW_MM),
-    cushion(v(L / 2 + middleHalf, 0), v(L - cornerNose, 0), MIDDLE_JAW_MM, CORNER_JAW_MM),
+    cushion(v(cornerNose, 0), v(L / 2 - middleHalf, 0), CJ, MJ),
+    cushion(v(L / 2 + middleHalf, 0), v(L - cornerNose, 0), MJ, CJ),
     // bottom rail, right half then left half (kept clockwise)
-    cushion(v(L - cornerNose, W), v(L / 2 + middleHalf, W), CORNER_JAW_MM, MIDDLE_JAW_MM),
-    cushion(v(L / 2 - middleHalf, W), v(cornerNose, W), MIDDLE_JAW_MM, CORNER_JAW_MM),
+    cushion(v(L - cornerNose, W), v(L / 2 + middleHalf, W), CJ, MJ),
+    cushion(v(L / 2 - middleHalf, W), v(cornerNose, W), MJ, CJ),
     // short rails (kept clockwise too, so the outward normal comes out right)
-    cushion(v(L, cornerNose), v(L, W - cornerNose), CORNER_JAW_MM, CORNER_JAW_MM),
-    cushion(v(0, W - cornerNose), v(0, cornerNose), CORNER_JAW_MM, CORNER_JAW_MM),
+    cushion(v(L, cornerNose), v(L, W - cornerNose), CJ, CJ),
+    cushion(v(0, W - cornerNose), v(0, cornerNose), CJ, CJ),
   ]
 
-  // Diamond sights, standard system: long rails at k/8 of the length with the
-  // 4th one dropped (that is where the middle pocket is), short rails at k/4.
-  const sightOut = CUSHION_MM + RAIL_MM / 2
+  // Diamond sights, standard system - the same on both tables: long rails at
+  // k/8 of the length with the 4th one dropped (that is where the middle
+  // pocket is), short rails at k/4.
+  const sightOut = spec.cushionMm + spec.railMm / 2
   const sights: Vec[] = []
   for (let k = 1; k <= 7; k++) {
     if (k === 4) continue
@@ -284,13 +419,19 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
     sights.push(v(-sightOut, y), v(L + sightOut, y))
   }
 
-  const crossLines = [0.25, 0.5, 0.75].map((f) => ({
+  // Pool marks the head string - the line the cue ball is broken from behind,
+  // the same quarter the pyramid calls the house - and the three spots on the
+  // long axis. The pyramid adds the half and three-quarter lines and draws the
+  // centre line itself.
+  const crossLines = (game === 'pool' ? [0.25] : [0.25, 0.5, 0.75]).map((f) => ({
     from: v(L * f, 0),
     to: v(L * f, W),
   }))
 
   return {
     cfg,
+    game,
+    spec,
     lengthMm: L,
     widthMm: W,
     outerWidthMm: L + 2 * B,
@@ -302,7 +443,10 @@ export function buildGeometry(cfg: TableConfig): TableGeometry {
     sights,
     crossLines,
     longLine: { from: v(0, W / 2), to: v(L, W / 2) },
-    // front centre (house line x centre line), table centre, back centre
+    drawLongLine: game !== 'pool',
+    // front centre (house line x centre line), table centre, back centre;
+    // on pool the head spot, the centre spot and the foot spot the rack is
+    // built on
     spots: [v(L * 0.25, W / 2), v(L * 0.5, W / 2), v(L * 0.75, W / 2)],
     houseLineX: L * 0.25,
   }

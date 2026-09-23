@@ -12,10 +12,11 @@
  * table instead of a crash.
  */
 
-import type { ClothColor, Item, PowerValue, Scene } from '../model/types'
+import type { ClothColor, Item, PowerValue, Scene, TableConfig } from '../model/types'
 import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE } from '../model/table'
-import { POWER_DEFAULT_MM, POWER_MAX_MM, POWER_MIN_MM } from '../model/item'
+import { POWER_DEFAULT_MM, STRIKE_DEFAULT_MM, powerRange, strikeRange } from '../model/item'
+import { gameOf, scaledPreset } from '../model/game'
 import { DEFAULT_DENSITY, isDensity, type Density } from '../brand/watermark'
 import { DEFAULT_FULLNESS, clampFullness, normDeg } from '../model/item'
 
@@ -47,8 +48,15 @@ const vec = (v: unknown): { x: number; y: number } | null => {
   return { x: o.x, y: o.y }
 }
 
-/** Keeps only items this build understands, with every field forced into range. */
-function parseItem(raw: unknown): Item | null {
+/** a pool number: a whole 1..15, or nothing */
+const poolNumber = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 15 ? v : undefined
+
+/**
+ * Keeps only items this build understands, with every field forced into range.
+ * The ranges of the two widgets depend on the table, so it comes along.
+ */
+function parseItem(raw: unknown, table: TableConfig): Item | null {
   if (!raw || typeof raw !== 'object') return null
   const o = raw as Record<string, unknown>
   const id = str(o.id)
@@ -58,7 +66,8 @@ function parseItem(raw: unknown): Item | null {
       const p = vec(o)
       if (!p) return null
       const kind = o.kind === 'cue' || o.kind === 'target' ? o.kind : 'white'
-      return { id, type: 'ball', x: p.x, y: p.y, kind, label: str(o.label) }
+      const number = poolNumber(o.number)
+      return { id, type: 'ball', x: p.x, y: p.y, kind, label: str(o.label), ...(number ? { number } : {}) }
     }
     case 'arrow': {
       if (!Array.isArray(o.points)) return null
@@ -160,7 +169,7 @@ function parseItem(raw: unknown): Item | null {
         type: 'strikePoint',
         x: p.x,
         y: p.y,
-        sizeMm: Math.min(500, Math.max(200, num(o.sizeMm, 300))),
+        sizeMm: Math.min(strikeRange(table)[1], Math.max(strikeRange(table)[0], num(o.sizeMm, scaledPreset(STRIKE_DEFAULT_MM, table)))),
         dot: { u: dot.x * k, v: dot.y * k },
         // an object ball that fails to validate is dropped, never guessed at:
         // half an aiming picture is one the coach did not draw
@@ -171,7 +180,8 @@ function parseItem(raw: unknown): Item | null {
       const p = vec(o)
       if (!p) return null
       const value = (POWER_VALUES as readonly number[]).includes(o.value as number) ? (o.value as PowerValue) : 2.5
-      const widthMm = Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, num(o.widthMm, POWER_DEFAULT_MM)))
+      const [lo, hi] = powerRange(table)
+      const widthMm = Math.min(hi, Math.max(lo, num(o.widthMm, scaledPreset(POWER_DEFAULT_MM, table))))
       return { id, type: 'power', x: p.x, y: p.y, value, widthMm }
     }
     case 'ghostBall': {
@@ -190,18 +200,22 @@ function parseScene(raw: unknown): Scene | null {
   if (o.version !== 1) return null
   const t = (o.table ?? {}) as Record<string, unknown>
   const cloth: ClothColor = t.cloth === 'green' ? 'green' : 'blue'
+  const table: TableConfig = {
+    // written only for pool, as tableFor does, so a pyramid scene reads back
+    // exactly as it was saved
+    ...(gameOf(t) === 'pool' ? { game: 'pool' as const } : {}),
+    lengthMm: num(t.lengthMm, DEFAULT_TABLE.lengthMm),
+    widthMm: num(t.widthMm, DEFAULT_TABLE.widthMm),
+    ballMm: num(t.ballMm, DEFAULT_TABLE.ballMm),
+    markings: t.markings !== false,
+    cloth,
+  }
   const items = Array.isArray(o.items)
-    ? o.items.map(parseItem).filter((i): i is Item => i !== null)
+    ? o.items.map((i) => parseItem(i, table)).filter((i): i is Item => i !== null)
     : []
   return {
     version: 1,
-    table: {
-      lengthMm: num(t.lengthMm, DEFAULT_TABLE.lengthMm),
-      widthMm: num(t.widthMm, DEFAULT_TABLE.widthMm),
-      ballMm: num(t.ballMm, DEFAULT_TABLE.ballMm),
-      markings: t.markings !== false,
-      cloth,
-    },
+    table,
     title: str(o.title),
     note: str(o.note),
     items,

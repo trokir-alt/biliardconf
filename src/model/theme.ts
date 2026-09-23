@@ -67,6 +67,31 @@ export const BALL = {
   target: { base: '#FF6B5A', shade: '#C63A28', rim: '#8E2418', text: '#FFFFFF' },
 } as const
 
+/**
+ * The pool set, in the colours every set is made in: 1-8 solid, 9-15 the same
+ * seven colours again as stripes, the 8 black. Kept a touch deeper than the
+ * printed swatches, because the body is lifted towards white under the lamp.
+ */
+export const POOL_COLOURS: Record<number, string> = {
+  1: '#F2B705', // yellow
+  2: '#1C4FA8', // blue
+  3: '#D3242E', // red
+  4: '#5B2A8E', // purple
+  5: '#F0661A', // orange
+  6: '#0D7C44', // green
+  7: '#7E1D27', // maroon
+  8: '#17181B', // black
+}
+
+/** colour and pattern of pool ball `n` (1..15), or null for anything else */
+export function poolBall(n: number | undefined): { colour: string; stripe: boolean } | null {
+  if (!n || !Number.isInteger(n) || n < 1 || n > 15) return null
+  return n <= 8 ? { colour: POOL_COLOURS[n], stripe: false } : { colour: POOL_COLOURS[n - 8], stripe: true }
+}
+
+/** the ball the tool glyph and a generic object ball are drawn as on pool */
+export const POOL_GENERIC = POOL_COLOURS[1]
+
 export const SELECTION = '#FFD166'
 
 /** app chrome, kept in sync with styles.css */

@@ -5,6 +5,7 @@
  */
 
 import type { ArrowHead, StrokeStyle } from './types'
+import { scaledPreset } from './game'
 
 /** six colours that all stay legible on both blue and green cloth */
 export const INK = [
@@ -18,13 +19,32 @@ export const INK = [
 
 export const DEFAULT_INK = INK[0].value
 
-/** stroke widths in table millimetres, per the stage 2 spec */
+/**
+ * Stroke widths in table millimetres, per the stage 2 spec - on the pyramid
+ * table. These are REFERENCE values: the coach's choice is remembered as one
+ * of them, and what lands on a given table is `scaledPreset(w, table)`, so
+ * the thin/medium/thick choice looks the same on a pool table as it does on
+ * the pyramid it was tuned on. On the pyramid the two are identical.
+ */
 export const STROKE_WIDTHS = [8, 14, 22] as const
 export const DEFAULT_STROKE_WIDTH = 14
 
-/** cap height in table millimetres */
+/** cap height in table millimetres; reference values, like the widths */
 export const TEXT_SIZES = [60, 90, 130] as const
 export const DEFAULT_TEXT_SIZE = 90
+
+/** the stroke width a reference width comes to on this table */
+export const strokeOn = (referenceMm: number, table: { game?: unknown }): number => scaledPreset(referenceMm, table)
+/** the cap height a reference size comes to on this table */
+export const textOn = (referenceMm: number, table: { game?: unknown }): number => scaledPreset(referenceMm, table)
+
+/**
+ * The reference value an item's actual size came from, or null if it matches
+ * none - the Properties panel lights the button that produced what is drawn.
+ */
+export function referenceOf(actualMm: number, refs: readonly number[], table: { game?: unknown }): number | null {
+  return refs.find((r) => scaledPreset(r, table) === actualMm) ?? null
+}
 
 export const DEFAULT_STYLE: StrokeStyle = 'solid'
 export const DEFAULT_HEAD: ArrowHead = 'end'

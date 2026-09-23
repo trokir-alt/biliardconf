@@ -239,6 +239,44 @@ export function pyramidBalls(g: TableGeometry, ballMm: number): Vec[] {
   return out
 }
 
+/**
+ * The three pool racks, as ball numbers row by row from the apex.
+ *
+ * Each follows its game's racking rule and is otherwise one fixed legal rack,
+ * so the same button always draws the same picture:
+ *  - eight-ball: 15 balls, the 8 in the centre, a solid and a stripe in the
+ *    two back corners;
+ *  - nine-ball: a diamond of 9, the 1 at the apex, the 9 in the centre;
+ *  - ten-ball: 10 balls, the 1 at the apex, the 10 in the middle of row three.
+ */
+export const POOL_RACKS = {
+  8: [[1], [10, 2], [3, 8, 11], [12, 4, 13, 5], [6, 14, 7, 15, 9]],
+  9: [[1], [2, 3], [4, 9, 5], [6, 7], [8]],
+  10: [[1], [2, 3], [4, 10, 5], [6, 7, 8, 9]],
+} as const
+
+export type PoolRack = keyof typeof POOL_RACKS
+
+/**
+ * A pool rack: the apex ball on the foot spot and the rack opening towards the
+ * foot rail, packed like the pyramid - the same pitch and the same hair of a
+ * gap, so the anti-overlap pass leaves it alone.
+ */
+export function poolRackBalls(g: TableGeometry, ballMm: number, rack: PoolRack): { x: number; y: number; number: number }[] {
+  const gap = 0.15
+  const rowPitch = (ballMm * Math.sqrt(3)) / 2 + gap
+  const sideStep = ballMm + gap
+  const apex = g.spots[2]
+  const cy = g.widthMm / 2
+  const out: { x: number; y: number; number: number }[] = []
+  POOL_RACKS[rack].forEach((row, r) => {
+    row.forEach((n, k) => {
+      out.push({ x: apex.x + r * rowPitch, y: cy + (k - (row.length - 1) / 2) * sideStep, number: n })
+    })
+  })
+  return out
+}
+
 /** Where the cue ball goes when racking: the middle of the house. */
 export function housePoint(g: TableGeometry): Vec {
   return { x: g.houseLineX / 2, y: g.widthMm / 2 }

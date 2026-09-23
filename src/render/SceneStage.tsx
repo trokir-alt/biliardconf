@@ -14,7 +14,8 @@ import Konva from 'konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { Item, Vec } from '../model/types'
 import { buildGeometry, clampToField } from '../model/table'
-import { dragHandle, defaultPowerWidth, type Handle } from '../model/item'
+import { STRIKE_DEFAULT_MM, dragHandle, defaultPowerWidth, type Handle } from '../model/item'
+import { gameOf, scaledPreset } from '../model/game'
 import { DEFAULT_ZONE_COLOR, ZONE_OPACITY, ghostCount } from '../model/style'
 import { newId, resolveOverlap, snapPoint } from '../lib/place'
 import { publishDebug } from '../lib/debug'
@@ -201,9 +202,9 @@ export function SceneStage({ stageRef }: SceneStageProps) {
         const id = newId(st.tool)
         const item: Item =
           st.tool === 'strike'
-            ? { id, type: 'strikePoint', x: p.x, y: p.y, sizeMm: 300, dot: { u: 0, v: 0 } }
+            ? { id, type: 'strikePoint', x: p.x, y: p.y, sizeMm: scaledPreset(STRIKE_DEFAULT_MM, st.scene.table), dot: { u: 0, v: 0 } }
             : st.tool === 'power'
-              ? { id, type: 'power', x: p.x, y: p.y, value: 2.5, widthMm: defaultPowerWidth(st.scene.table.lengthMm) }
+              ? { id, type: 'power', x: p.x, y: p.y, value: 2.5, widthMm: defaultPowerWidth(st.scene.table) }
               : { id, type: 'ghostBall', x: p.x, y: p.y }
         // widgets sit above the balls and arrows, below the captions
         st.addItem(item, st.tool === 'ghost-ball' ? 'top' : 'belowText')
@@ -216,7 +217,8 @@ export function SceneStage({ stageRef }: SceneStageProps) {
           x: p.x,
           y: p.y,
           text: 'Текст',
-          size: st.draft.textSize,
+          // the draft remembers the coach's choice on the pyramid's scale
+          size: scaledPreset(st.draft.textSize, st.scene.table),
           color: st.draft.ink,
           angle: 0,
         }
@@ -371,7 +373,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
               points: [d.from, to],
               style: ds.style,
               color: ds.ink,
-              width: ds.width,
+              width: scaledPreset(ds.width, st.scene.table),
               head: ds.head,
               curved: false,
             }
@@ -384,7 +386,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
               to,
               style: ds.style,
               color: ds.ink,
-              width: ds.width,
+              width: scaledPreset(ds.width, st.scene.table),
             }
             break
           case 'ghost':
@@ -594,7 +596,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
       if (!item) return
       const node = e.target
       const p = snapPt({ x: node.x(), y: node.y() })
-      const patch = dragHandle(item, h.id, p)
+      const patch = dragHandle(item, h.id, p, useStore.getState().scene.table)
       if (patch) st.updateItemLive(item.id, patch)
     },
     [snapPt],
@@ -694,9 +696,9 @@ export function SceneStage({ stageRef }: SceneStageProps) {
     const ds = st.draft
     switch (draft.tool) {
       case 'arrow':
-        return { id: 'draft', type: 'arrow', points: [from, to], style: ds.style, color: ds.ink, width: ds.width, head: ds.head, curved: false }
+        return { id: 'draft', type: 'arrow', points: [from, to], style: ds.style, color: ds.ink, width: scaledPreset(ds.width, table), head: ds.head, curved: false }
       case 'line':
-        return { id: 'draft', type: 'line', from, to, style: ds.style, color: ds.ink, width: ds.width }
+        return { id: 'draft', type: 'line', from, to, style: ds.style, color: ds.ink, width: scaledPreset(ds.width, table) }
       case 'ghost':
         return {
           id: 'draft',
@@ -721,7 +723,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
           opacity: ZONE_OPACITY,
         }
     }
-  }, [draft, table.ballMm])
+  }, [draft, table])
 
   const noop = useCallback(() => {}, [])
 
@@ -783,6 +785,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
                   key={item.id}
                   item={item}
                   ballMm={table.ballMm}
+                  game={gameOf(table)}
                   selected={item.id === selectedId}
                   draggable={selecting}
                   onSelect={handleSelect}
@@ -798,6 +801,7 @@ export function SceneStage({ stageRef }: SceneStageProps) {
                 <ItemView
                   item={preview}
                   ballMm={table.ballMm}
+                  game={gameOf(table)}
                   selected={false}
                   draggable={false}
                   onSelect={noop}

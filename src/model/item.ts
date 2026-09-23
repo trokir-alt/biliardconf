@@ -7,6 +7,7 @@
 
 import type { Item, StrikePointItem, Vec } from './types'
 import { quadControl } from './style'
+import { GAME_ORDER, scaledPreset } from './game'
 
 export type Rect = { x: number; y: number; w: number; h: number }
 
@@ -82,14 +83,30 @@ export const POWER_ART = { w: 100, pad: 7, cell: 62, gap: 6 }
 /** 7 + 9*62 + 8*6 + 7 = 620 */
 export const POWER_ART_H = 2 * POWER_ART.pad + POWER_CELLS * POWER_ART.cell + (POWER_CELLS - 1) * POWER_ART.gap
 export const POWER_RATIO = POWER_ART_H / POWER_ART.w
+/** the pyramid's range; see `powerRange` for any other table */
 export const POWER_MIN_MM = 70
 export const POWER_MAX_MM = 170
 export const POWER_DEFAULT_MM = 90
 
-/** width chosen for a table of this length, kept inside the allowed range */
-export function defaultPowerWidth(lengthMm: number): number {
-  return Math.round(Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, lengthMm / 40)))
+/**
+ * How narrow and how wide the plate may be made on this table: the pyramid's
+ * range, scaled the way every other preset is (see `presetScale`).
+ */
+export function powerRange(table: { game?: unknown }): [number, number] {
+  return [scaledPreset(POWER_MIN_MM, table), scaledPreset(POWER_MAX_MM, table)]
 }
+
+/** width chosen for a table of this length, kept inside the allowed range */
+export function defaultPowerWidth(table: { game?: unknown; lengthMm: number }): number {
+  const [lo, hi] = powerRange(table)
+  return Math.round(Math.min(hi, Math.max(lo, table.lengthMm / 40)))
+}
+
+/** the widest range any table allows: the renderer's guard, not a rule */
+const POWER_ANY: [number, number] = [
+  Math.min(...GAME_ORDER.map((g) => powerRange({ game: g })[0])),
+  Math.max(...GAME_ORDER.map((g) => powerRange({ game: g })[1])),
+]
 
 /**
  * The cell a value occupies, counted from the TOP - the hardest shot is the
@@ -122,7 +139,7 @@ export function powerCellColour(fromTop: number, spent: boolean): string {
  */
 export function powerSize(item: { widthMm?: number }): { w: number; h: number } {
   const raw = Number.isFinite(item.widthMm) ? (item.widthMm as number) : POWER_DEFAULT_MM
-  const w = Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, raw))
+  const w = Math.min(POWER_ANY[1], Math.max(POWER_ANY[0], raw))
   return { w, h: w * POWER_RATIO }
 }
 
@@ -130,9 +147,17 @@ export function powerSize(item: { widthMm?: number }): { w: number; h: number } 
 export function powerButtonReach(w: number): number {
   return w * 0.72
 }
-/** the strike-point ball may be resized between these */
+/** the strike-point ball may be resized between these, on the pyramid */
 export const STRIKE_MIN_MM = 200
 export const STRIKE_MAX_MM = 500
+/** the four sizes offered as buttons; reference values, like the widths */
+export const STRIKE_SIZES = [200, 300, 400, 500] as const
+export const STRIKE_DEFAULT_MM = 300
+
+/** the strike ball's range on this table, scaled like every other preset */
+export function strikeRange(table: { game?: unknown }): [number, number] {
+  return [scaledPreset(STRIKE_MIN_MM, table), scaledPreset(STRIKE_MAX_MM, table)]
+}
 /** where the strike ball's size handle sits, as a multiple of its radius */
 export const STRIKE_HANDLE_K = 1.3
 
@@ -273,8 +298,11 @@ export function itemHandles(item: Item): Handle[] {
   }
 }
 
-/** Apply a handle drag. Returns a patch for the item, or null if nothing moved. */
-export function dragHandle(item: Item, handleId: string, to: Vec): Partial<Item> | null {
+/**
+ * Apply a handle drag. Returns a patch for the item, or null if nothing moved.
+ * `table` sets the size limits of the two widgets; see `presetScale`.
+ */
+export function dragHandle(item: Item, handleId: string, to: Vec, table: { game?: unknown } = {}): Partial<Item> | null {
   switch (item.type) {
     case 'arrow': {
       const pts = item.points.slice()
@@ -310,11 +338,13 @@ export function dragHandle(item: Item, handleId: string, to: Vec): Partial<Item>
       // diagonal; the locked aspect turns it back into a width
       const d = Math.hypot(to.x - item.x, to.y - item.y)
       const width = (2 * d) / Math.hypot(1, POWER_RATIO)
-      return { widthMm: Math.round(Math.min(POWER_MAX_MM, Math.max(POWER_MIN_MM, width))) } as Partial<Item>
+      const [lo, hi] = powerRange(table)
+      return { widthMm: Math.round(Math.min(hi, Math.max(lo, width))) } as Partial<Item>
     }
     case 'strikePoint': {
       const size = (2 * Math.hypot(to.x - item.x, to.y - item.y)) / STRIKE_HANDLE_K
-      return { sizeMm: Math.round(Math.min(STRIKE_MAX_MM, Math.max(STRIKE_MIN_MM, size))) } as Partial<Item>
+      const [lo, hi] = strikeRange(table)
+      return { sizeMm: Math.round(Math.min(hi, Math.max(lo, size))) } as Partial<Item>
     }
     default:
       return null

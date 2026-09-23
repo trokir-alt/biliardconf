@@ -13,7 +13,18 @@ export type Vec = { x: number; y: number }
 
 export type ClothColor = 'blue' | 'green'
 
+/**
+ * Which game the table is for. It decides the table itself - size, pockets,
+ * rails, markings - and how the balls look; see model/game.ts.
+ */
+export type Game = 'pyramid' | 'pool'
+
 export type TableConfig = {
+  /**
+   * Absent on every scene saved before pool existed, and those are all Russian
+   * pyramid; read it through `gameOf`, never directly.
+   */
+  game?: Game
   lengthMm: number
   widthMm: number
   ballMm: number
@@ -31,9 +42,21 @@ export type BallItem = ItemBase & {
   type: 'ball'
   x: number
   y: number
+  /**
+   * 'cue' is the ball that is struck, whatever the game draws it as: amber on
+   * a pyramid table, white on a pool one. 'white' is an object ball.
+   */
   kind: BallKind
   /** optional digit or letter drawn on the ball */
   label?: string
+  /**
+   * The pool number, 1..15, of an object ball. It is what the ball looks like
+   * on a pool table - its colour, solid or stripe, the number in its disc.
+   *
+   * A pyramid table ignores it rather than dropping it, so an exercise taken
+   * to the pyramid table and back keeps every ball the coach had numbered.
+   */
+  number?: number
 }
 
 /* ---------------------------------------------------------------- stage 2 */
@@ -115,7 +138,7 @@ export type StrikePointItem = ItemBase & {
   type: 'strikePoint'
   x: number
   y: number
-  /** diameter in table mm, 200..500 */
+  /** diameter in table mm: 200..500 on the pyramid, scaled on pool (strikeRange) */
   sizeMm: number
   dot: { u: number; v: number }
   /**

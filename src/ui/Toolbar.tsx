@@ -21,7 +21,9 @@ export type ToolbarProps = {
 
 const EXPORT_SCALES = [1, 2, 3]
 
-import { TOOLS } from './tools'
+import { toolsFor } from './tools'
+import { GamePicker, RackButtons } from './GameControls'
+import { useGame } from './useGame'
 import { BrandLockup } from './Brand'
 import { DensityPicker } from './DensityPicker'
 import { SyncBadge } from './SyncBadge'
@@ -30,7 +32,6 @@ import { useLibrary } from '../state/library'
 export function Toolbar({ onExport, onCopy, onOpenLibrary }: ToolbarProps) {
   const tool = useStore((s) => s.tool)
   const setTool = useStore((s) => s.setTool)
-  const rackPyramid = useStore((s) => s.rackPyramid)
   const createNew = useLibrary((s) => s.createNew)
   const libraryCount = useLibrary((s) => s.items.filter((m) => m.deletedAt === null).length)
   const undo = useStore((s) => s.undo)
@@ -49,6 +50,7 @@ export function Toolbar({ onExport, onCopy, onOpenLibrary }: ToolbarProps) {
   const toggleSnap = useStore((s) => s.toggleSnap)
   const noOverlap = useStore((s) => s.noOverlap)
   const toggleNoOverlap = useStore((s) => s.toggleNoOverlap)
+  const game = useGame()
 
   const [exportScale, setExportScale] = useState(2)
   const [format, setFormat] = useState<ExportFormat>('jpeg')
@@ -76,7 +78,7 @@ export function Toolbar({ onExport, onCopy, onOpenLibrary }: ToolbarProps) {
       <section className="tool-group">
         <h2 className="tool-group__title">Инструменты</h2>
         <div className="tool-group__body tool-grid">
-          {TOOLS.map((t) => (
+          {toolsFor(game).map((t) => (
             <button
               key={t.id}
               type="button"
@@ -95,9 +97,10 @@ export function Toolbar({ onExport, onCopy, onOpenLibrary }: ToolbarProps) {
       <section className="tool-group">
         <h2 className="tool-group__title">Расстановка</h2>
         <div className="tool-group__body">
-          <button type="button" className="btn" onClick={rackPyramid}>
-            Пирамида
-          </button>
+          {/* the game first: it decides which racks there are and what every
+              ball on the table looks like */}
+          <GamePicker id="game-desktop" />
+          <RackButtons />
           <button type="button" className="btn" onClick={askNew}>
             Новое упражнение
           </button>
@@ -182,21 +185,24 @@ export function Toolbar({ onExport, onCopy, onOpenLibrary }: ToolbarProps) {
             </span>
           </div>
 
-          <div className="row">
-            <label className="row__label" htmlFor="ball-mm">
-              Диаметр шара
-            </label>
-            <span className="row__control">
-              <select id="ball-mm" className="select" value={ballMm} onChange={(e) => setBallMm(Number(e.target.value))}>
-                {BALL_SIZES.map((mm) => (
-                  <option key={mm} value={mm}>
-                    {mm}
-                  </option>
-                ))}
-              </select>
-              <span className="row__unit">мм</span>
-            </span>
-          </div>
+          {/* pool is played with one ball, 57.15 mm; there is nothing to choose */}
+          {game === 'pyramid' && (
+            <div className="row">
+              <label className="row__label" htmlFor="ball-mm">
+                Диаметр шара
+              </label>
+              <span className="row__control">
+                <select id="ball-mm" className="select" value={ballMm} onChange={(e) => setBallMm(Number(e.target.value))}>
+                  {BALL_SIZES.map((mm) => (
+                    <option key={mm} value={mm}>
+                      {mm}
+                    </option>
+                  ))}
+                </select>
+                <span className="row__unit">мм</span>
+              </span>
+            </div>
+          )}
 
           <DensityPicker id="density-desktop" />
 

@@ -19,13 +19,8 @@ import { memo } from 'react'
 import { Circle, Group, Line, Rect, Ring, Shape } from 'react-konva'
 import type { Context } from 'konva/lib/Context'
 import type { Shape as KonvaShape } from 'konva/lib/Shape'
-import type { Pocket, TableGeometry } from '../model/table'
-import {
-  CUSHION_MM,
-  FRAME_LIP_MM,
-  TABLE_CORNER_RADIUS_MM,
-  RIM_MM,
-} from '../model/table'
+import type { Pocket, TableGeometry, TableSpec } from '../model/table'
+import { FRAME_LIP_MM, TABLE_CORNER_RADIUS_MM } from '../model/table'
 import type { Vec } from '../model/types'
 import type { ClothPalette } from '../model/theme'
 import { CLOTH, MARKING, MARKING_SPOT, POCKET_THROAT, SIGHT, WOOD } from '../model/theme'
@@ -40,6 +35,9 @@ const BODY_SHADOW_OFFSET_MM = 11
 /** mother-of-pearl sight dots on the wooden rail */
 const SIGHT_R_MM = 11
 const SIGHT_RIM_MM = 1.2
+/** a pool table's sights are diamonds: long along the rail, narrow across it */
+const DIAMOND_ALONG_MM = 26
+const DIAMOND_ACROSS_MM = 13
 
 /** cloth is rounded just enough to kill the hard corner under the castings */
 const CLOTH_CORNER_MM = 10
@@ -95,6 +93,14 @@ const unit = (a: Vec): Vec => {
 /** the cream ring round a hole, lit from the same corner as everything else */
 const RIM = '#E8E2D0'
 const RIM_SHADE = '#CBC3AE'
+/**
+ * A pool pocket has no cup: the hole is lined with black leather that folds
+ * over its edge, so the ring is the leather's lip - near black, with just
+ * enough lift on the lit side to read as a rolled edge and not a hole.
+ */
+const LEATHER = '#2A2521'
+const LEATHER_SHADE = '#161312'
+const LEATHER_HIGHLIGHT = '#6A5E54'
 /** near-black, on purpose: it must read as black on the wood but stay above
     the "black past the rubber" threshold the picture check enforces */
 const CAP = '#221F1C'
@@ -104,9 +110,47 @@ const CAP_ROUND_MM = 20
 /** rounding of a cushion end where it meets the rim */
 const CUSHION_END_R_MM = 10
 
+/**
+ * The path of a pool pocket's opening: across the shelf line, back along one
+ * jaw face, round the half circle behind the cushions and forward along the
+ * other face. The half circle is the one whose midpoint lies OUT of the table.
+ */
+function dropPath(ctx: Context, p: Pocket, grow = 0) {
+  const d = p.drop!
+  const { c } = p.hole
+  const r = p.hole.r + grow
+  const a1 = Math.atan2(d.backs[0].y - c.y, d.backs[0].x - c.x)
+  const outAngle = Math.atan2(p.out.y, p.out.x)
+  // which way round reaches the out side: compare the midpoint of the
+  // clockwise sweep with the out direction
+  const cw = Math.cos(a1 + Math.PI / 2 - outAngle) > 0
+  ctx.moveTo(d.front[0].x, d.front[0].y)
+  ctx.lineTo(d.backs[0].x, d.backs[0].y)
+  ctx.arc(c.x, c.y, r, a1, a1 + (cw ? Math.PI : -Math.PI), !cw)
+  ctx.lineTo(d.backs[1].x, d.backs[1].y)
+  ctx.lineTo(d.front[1].x, d.front[1].y)
+  ctx.closePath()
+}
+
 /** The hole itself. Black in the middle, barely lifted at the far wall. */
 function PocketHole({ p }: { p: Pocket }) {
   const { c, r } = p.hole
+  if (p.drop) {
+    return (
+      <Shape
+        sceneFunc={(ctx: Context, shape: KonvaShape) => {
+          ctx.beginPath()
+          dropPath(ctx, p)
+          ctx.fillStrokeShape(shape)
+        }}
+        fillRadialGradientStartPoint={{ x: c.x - r * 0.3, y: c.y - r * 0.3 }}
+        fillRadialGradientStartRadius={0}
+        fillRadialGradientEndPoint={c}
+        fillRadialGradientEndRadius={r * 1.6}
+        fillRadialGradientColorStops={[0, '#000000', 0.6, POCKET_THROAT, 1, mix(POCKET_THROAT, WOOD.dark, 0.2)]}
+      />
+    )
+  }
   return (
     <Circle
       x={c.x}
@@ -125,20 +169,70 @@ function PocketHole({ p }: { p: Pocket }) {
  * The rim: a light ring round the hole, sitting on the wood and the rubber
  * both. Drawn before the cushions, so their rounded ends lie over it.
  */
-function PocketRim({ p }: { p: Pocket }) {
+function PocketRim({ p, spec }: { p: Pocket; spec: TableSpec }) {
   const { c, r } = p.hole
+  const rim = spec.rimMm
+  const leather = spec.pocketLook === 'leather'
+  if (p.drop) {
+    // the leather lip follows the round back of the opening, on the wood;
+    // along the faces the rubber itself is the edge
+    const d = p.drop
+    const a1 = Math.atan2(d.backs[0].y - c.y, d.backs[0].x - c.x)
+    const outAngle = Math.atan2(p.out.y, p.out.x)
+    const cw = Math.cos(a1 + Math.PI / 2 - outAngle) > 0
+    const arc = (ctx: Context, radius: number) => {
+      ctx.beginPath()
+      ctx.arc(c.x, c.y, radius, a1, a1 + (cw ? Math.PI : -Math.PI), !cw)
+    }
+    return (
+      <Group>
+        <Shape
+          sceneFunc={(ctx: Context, shape: KonvaShape) => {
+            arc(ctx, r + rim / 2)
+            ctx.strokeShape(shape)
+          }}
+          stroke={LEATHER}
+          strokeWidth={rim}
+          lineCap="butt"
+          shadowColor="rgba(0,0,0,0.4)"
+          shadowBlur={4}
+          shadowOffsetY={1.5}
+        />
+        {/* the rolled edge catches the lamp on the side that faces it */}
+        <Shape
+          sceneFunc={(ctx: Context, shape: KonvaShape) => {
+            arc(ctx, r + rim * 0.7)
+            ctx.strokeShape(shape)
+          }}
+          stroke={rgba(LEATHER_HIGHLIGHT, 0.5)}
+          strokeWidth={rim * 0.25}
+          lineCap="butt"
+        />
+        <Shape
+          sceneFunc={(ctx: Context, shape: KonvaShape) => {
+            arc(ctx, r + 1)
+            ctx.strokeShape(shape)
+          }}
+          stroke="rgba(0,0,0,0.45)"
+          strokeWidth={2.4}
+        />
+      </Group>
+    )
+  }
   return (
     <Group>
       <Ring
         x={c.x}
         y={c.y}
         innerRadius={r}
-        outerRadius={r + RIM_MM}
-        fillRadialGradientStartPoint={{ x: 0, y: 0 }}
+        outerRadius={r + rim}
+        fillRadialGradientStartPoint={leather ? { x: -rim * 0.6, y: -rim * 0.6 } : { x: 0, y: 0 }}
         fillRadialGradientStartRadius={r}
         fillRadialGradientEndPoint={{ x: 0, y: 0 }}
-        fillRadialGradientEndRadius={r + RIM_MM}
-        fillRadialGradientColorStops={[0, RIM_SHADE, 0.45, RIM, 1, RIM]}
+        fillRadialGradientEndRadius={r + rim}
+        fillRadialGradientColorStops={
+          leather ? [0, LEATHER_SHADE, 0.55, LEATHER, 1, LEATHER_SHADE] : [0, RIM_SHADE, 0.45, RIM, 1, RIM]
+        }
         stroke={rgba(WOOD.edgeShadow, 0.45)}
         strokeWidth={1.2}
       />
@@ -155,15 +249,15 @@ function PocketRim({ p }: { p: Pocket }) {
 }
 
 /** The black cap over the outer half of a middle pocket, on the frame. */
-function MiddleCap({ p }: { p: Pocket }) {
+function MiddleCap({ p, cushionMm }: { p: Pocket; cushionMm: number }) {
   const tan: Vec = { x: -p.out.y, y: p.out.x }
   const at = (s: number, d: number): Vec => ({
     x: p.at.x + tan.x * s + p.out.x * d,
     y: p.at.y + tan.y * s + p.out.y * d,
   })
   const half = CAP_W_MM / 2
-  const i = CUSHION_MM - 0.5
-  const o = CUSHION_MM + CAP_DEPTH_MM
+  const i = cushionMm - 0.5
+  const o = cushionMm + CAP_DEPTH_MM
   const rr = CAP_ROUND_MM
   return (
     <Shape
@@ -198,7 +292,7 @@ function MiddleCap({ p }: { p: Pocket }) {
  * and a soft shadow dropped onto the bed by the noses that face away from the
  * light.
  */
-function Cushion({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
+function Cushion({ poly, felt, cushionMm }: { poly: number[]; felt: ClothPalette; cushionMm: number }) {
   const a: Vec = { x: poly[0], y: poly[1] }
   const b: Vec = { x: poly[2], y: poly[3] }
   const bBack: Vec = { x: poly[4], y: poly[5] }
@@ -212,7 +306,7 @@ function Cushion({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
 
   const nose = shift(felt.cushion, 0.01 + 0.08 * lit)
   // the rubber is a ramp: darkest against the wood, lifting towards the nose
-  const contact = CUSHION_MM * 0.42
+  const contact = cushionMm * 0.42
   return (
     <Group>
       <Shape
@@ -310,6 +404,34 @@ function CushionShadow({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
 
 /* --------------------------------------------------------------------- wood */
 
+/**
+ * A pool sight: a mother-of-pearl diamond, long along its rail. Lit like the
+ * round ones - bright at the upper left, a shade darker at the far point.
+ */
+function Diamond({ at, alongX }: { at: Vec; alongX: boolean }) {
+  const a = DIAMOND_ALONG_MM / 2
+  const c = DIAMOND_ACROSS_MM / 2
+  const pts = alongX ? [-a, 0, 0, -c, a, 0, 0, c] : [0, -a, c, 0, 0, a, -c, 0]
+  return (
+    <Line
+      x={at.x}
+      y={at.y}
+      points={pts}
+      closed
+      fillLinearGradientStartPoint={{ x: -a * 0.7, y: -a * 0.7 }}
+      fillLinearGradientEndPoint={{ x: a * 0.7, y: a * 0.7 }}
+      fillLinearGradientColorStops={[0, '#FFFFFF', 0.55, SIGHT, 1, shift(SIGHT, -0.14)]}
+      stroke={rgba(WOOD.edgeShadow, 0.45)}
+      strokeWidth={SIGHT_RIM_MM}
+      lineJoin="round"
+      shadowColor={rgba(WOOD.edgeShadow, 0.5)}
+      shadowBlur={3}
+      shadowOffsetX={0.8}
+      shadowOffsetY={0.8}
+    />
+  )
+}
+
 
 /* --------------------------------------------------------------------- view */
 
@@ -329,12 +451,20 @@ function CushionShadow({ poly, felt }: { poly: number[]; felt: ClothPalette }) {
  */
 export const TableView = memo(function TableView({ g }: { g: TableGeometry }): JSX.Element {
   const felt = CLOTH[g.cfg.cloth]
+  const C = g.spec.cushionMm
 
   // cloth footprint: the play field plus the cushion band it wraps
-  const cx = -CUSHION_MM
-  const cy = -CUSHION_MM
-  const cw = g.lengthMm + 2 * CUSHION_MM
-  const ch = g.widthMm + 2 * CUSHION_MM
+  const cx = -C
+  const cy = -C
+  const cw = g.lengthMm + 2 * C
+  const ch = g.widthMm + 2 * C
+
+  // the pyramid's middle pockets lie over the rubber ends; everything else,
+  // pool's side pockets included, goes under the cushions so the faces that
+  // lean into the hole are what shape it
+  const under = g.pockets.filter((p) => p.kind === 'corner' || !g.spec.middleOverCushions)
+  const over = g.pockets.filter((p) => p.kind === 'middle' && g.spec.middleOverCushions)
+  const middles = g.pockets.filter((p) => p.kind === 'middle')
   const fx = cx + cw / 2
   const fy = cy + ch / 2
 
@@ -412,8 +542,12 @@ export const TableView = memo(function TableView({ g }: { g: TableGeometry }): J
         ]}
       />
 
-      {/* 4. sight dots, set flush into the wood */}
-      {g.sights.map((s, i) => (
+      {/* 4. sights, set flush into the wood: round inlays on the pyramid,
+          diamonds on pool */}
+      {g.spec.sights === 'diamond' && g.sights.map((s, i) => (
+        <Diamond key={i} at={s} alongX={s.y < 0 || s.y > g.widthMm} />
+      ))}
+      {g.spec.sights === 'dot' && g.sights.map((s, i) => (
         <Circle
           key={i}
           x={s.x}
@@ -489,12 +623,14 @@ export const TableView = memo(function TableView({ g }: { g: TableGeometry }): J
               lineCap="round"
             />
           ))}
-          <Line
-            points={[g.longLine.from.x, g.longLine.from.y, g.longLine.to.x, g.longLine.to.y]}
-            stroke={MARKING}
-            strokeWidth={MARKING_W_MM}
-            lineCap="round"
-          />
+          {g.drawLongLine && (
+            <Line
+              points={[g.longLine.from.x, g.longLine.from.y, g.longLine.to.x, g.longLine.to.y]}
+              stroke={MARKING}
+              strokeWidth={MARKING_W_MM}
+              lineCap="round"
+            />
+          )}
           {g.spots.map((s, i) => (
             <Circle key={i} x={s.x} y={s.y} radius={SPOT_R_MM} fill={MARKING_SPOT} />
           ))}
@@ -503,31 +639,33 @@ export const TableView = memo(function TableView({ g }: { g: TableGeometry }): J
 
       {/* 8. corner pockets go under the cushions: the rounded rubber ends lie
           over the ring, which is how the corner reads on a broadcast */}
-      {g.pockets.filter((p) => p.kind === 'corner').map((p) => (
+      {under.map((p) => (
         <PocketHole key={p.id} p={p} />
       ))}
-      {g.pockets.filter((p) => p.kind === 'corner').map((p) => (
-        <PocketRim key={p.id} p={p} />
+      {under.map((p) => (
+        <PocketRim key={p.id} p={p} spec={g.spec} />
       ))}
 
       {/* 9. the cushion band: the step between the wood and the bed */}
       {g.cushions.map((poly, i) => (
-        <Cushion key={i} poly={poly} felt={felt} />
+        <Cushion key={i} poly={poly} felt={felt} cushionMm={C} />
       ))}
       {g.cushions.map((poly, i) => (
         <CushionShadow key={i} poly={poly} felt={felt} />
       ))}
 
-      {/* 10. middle pockets go over the cushions: the whole ring stays visible
-          between the two rubber ends, then the black cap covers its outer half */}
-      {g.pockets.filter((p) => p.kind === 'middle').map((p) => (
+      {/* 10. the pyramid's middle pockets go over the cushions: the whole ring
+          stays visible between the two rubber ends */}
+      {over.map((p) => (
         <PocketHole key={p.id} p={p} />
       ))}
-      {g.pockets.filter((p) => p.kind === 'middle').map((p) => (
-        <PocketRim key={p.id} p={p} />
+      {over.map((p) => (
+        <PocketRim key={p.id} p={p} spec={g.spec} />
       ))}
-      {g.pockets.filter((p) => p.kind === 'middle').map((p) => (
-        <MiddleCap key={p.id} p={p} />
+      {/* then, on the pyramid, the black cap covers the outer half of every
+          middle pocket; pool's leather is already drawn */}
+      {g.spec.pocketLook === 'cup' && middles.map((p) => (
+        <MiddleCap key={p.id} p={p} cushionMm={C} />
       ))}
     </Group>
   )

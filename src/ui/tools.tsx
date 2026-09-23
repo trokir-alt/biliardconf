@@ -5,6 +5,8 @@
 
 import type { ReactNode } from 'react'
 import type { Tool } from '../state/store'
+import type { Game } from '../model/types'
+import { POOL_GENERIC } from '../model/theme'
 
 const glyph = (children: ReactNode) => (
   <svg className="glyph" viewBox="0 0 18 18" aria-hidden="true" focusable="false">
@@ -16,6 +18,13 @@ export const GLYPH = {
   cursor: glyph(<path d="M4 2.5 L13.5 9.2 L9.3 10 L11.4 14.4 L9.3 15.4 L7.2 11 L4 13.6 Z" fill="currentColor" />),
   white: glyph(<circle cx="9" cy="9" r="6.2" fill="#FFFFFF" stroke="rgba(0,0,0,.45)" strokeWidth="1" />),
   cue: glyph(<circle cx="9" cy="9" r="6.2" fill="#F5A623" stroke="rgba(0,0,0,.45)" strokeWidth="1" />),
+  /** a numbered pool ball: the 1, yellow with its white disc */
+  pool: glyph(
+    <>
+      <circle cx="9" cy="9" r="6.2" fill={POOL_GENERIC} stroke="rgba(0,0,0,.45)" strokeWidth="1" />
+      <circle cx="9" cy="9" r="2.8" fill="#FFFFFF" />
+    </>,
+  ),
   arrow: glyph(
     <>
       <path d="M3 14 L13 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
@@ -83,3 +92,17 @@ export const TOOLS: { id: Tool; label: string; short: string; icon: ReactNode }[
   { id: 'power', label: 'Сила удара', short: 'Сила', icon: GLYPH.power },
   { id: 'ghost-ball', label: 'Шар-призрак', short: 'Призрак', icon: GLYPH.ghostBall },
 ]
+
+/**
+ * The same tools on a pool table, where the two ball tools mean the other
+ * pair: an object ball is a numbered one, and the cue ball is white.
+ */
+const POOL_BALL_TOOLS: Partial<Record<Tool, { label: string; short: string; icon: ReactNode }>> = {
+  'ball-white': { label: 'Номерной шар', short: 'Шар', icon: GLYPH.pool },
+  'ball-cue': { label: 'Биток', short: 'Биток', icon: GLYPH.white },
+}
+
+export function toolsFor(game: Game) {
+  if (game !== 'pool') return TOOLS
+  return TOOLS.map((t) => ({ ...t, ...(POOL_BALL_TOOLS[t.id] ?? {}) }))
+}

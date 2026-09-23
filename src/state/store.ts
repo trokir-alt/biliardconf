@@ -15,6 +15,7 @@ import type {
   BallItem,
   BallKind,
   ClothColor,
+  Game,
   Item,
   Orientation,
   PowerValue,
@@ -26,13 +27,14 @@ import { POWER_VALUES } from '../model/types'
 import { DEFAULT_TABLE, buildGeometry, clampToField } from '../model/table'
 import {
   DEFAULT_FULLNESS,
-  STRIKE_MAX_MM,
-  STRIKE_MIN_MM,
   clampFullness,
   itemBounds,
+  strikeRange,
   translateItem,
   type CompanionSide,
 } from '../model/item'
+import { gameOf, isPool, scaledPreset } from '../model/game'
+import { convertScene, nextPoolNumber } from '../model/convert'
 import {
   DEFAULT_HEAD,
   DEFAULT_INK,
@@ -43,7 +45,17 @@ import {
   GHOST_MIN,
   ghostCount,
 } from '../model/style'
-import { freeSpot, housePoint, newId, pyramidBalls, resolveOverlap, snapPoint, snapTouch } from '../lib/place'
+import {
+  freeSpot,
+  housePoint,
+  newId,
+  poolRackBalls,
+  pyramidBalls,
+  resolveOverlap,
+  snapPoint,
+  snapTouch,
+  type PoolRack,
+} from '../lib/place'
 import { loadDensity, loadScene, saveDensity } from '../lib/storage'
 import type { Density } from '../brand/watermark'
 import { DEFAULT_DENSITY } from '../brand/watermark'
@@ -71,7 +83,14 @@ export type Placement = 'top' | 'bottom' | 'belowText'
 /** tools that are drawn with one press-drag-release gesture */
 export const DRAG_TOOLS: Tool[] = ['arrow', 'ghost', 'zone-rect', 'zone-ellipse', 'line']
 
-/** style carried from one object to the next, so a run of arrows matches */
+/**
+ * Style carried from one object to the next, so a run of arrows matches.
+ *
+ * `width` and `textSize` are REFERENCE values - one of STROKE_WIDTHS and
+ * TEXT_SIZES, the pyramid's millimetres. The coach chose "thin" or "large",
+ * not a number of millimetres, and that choice has to mean the same on
+ * either table; what is drawn is `scaledPreset(value, table)`.
+ */
 export type DraftStyle = {
   ink: string
   width: number
@@ -104,6 +123,8 @@ export type AppState = {
   toggleMarkings: () => void
   setCloth: (cloth: ClothColor) => void
   setBallMm: (mm: number) => void
+  /** the whole exercise moves to the other table, as one undo */
+  setGame: (game: Game) => void
 
   /* ---- draft style ---- */
   setInk: (color: string) => void
@@ -117,6 +138,8 @@ export type AppState = {
 
   /* ---- editing ---- */
   addBall: (kind: BallKind, at?: Vec) => void
+  /** a pool ball's number, or 'cue' to make it the cue ball */
+  setBallNumber: (id: string, number: number | 'cue') => void
   /** a zone lands at the bottom, a widget just under the captions */
   addItem: (item: Item, placement?: Placement) => void
   /** wireframe ball: clamp and contact-snap, never push-apart */
@@ -146,6 +169,7 @@ export type AppState = {
   clear: () => void
   newExercise: () => void
   rackPyramid: () => void
+  rackPool: (rack: PoolRack) => void
   replaceScene: (scene: Scene) => void
 
   /* ---- exercise ---- */
@@ -258,10 +282,22 @@ export const useStore = create<AppState>()(
         edit((s) => {
           s.scene.table.cloth = cloth
         }),
-      setBallMm: (mm) =>
+      setBallMm: (mm) => {
+        // pool is played with one ball; the size is the game's, not a setting
+        if (isPool(get().scene.table)) return
         edit((s) => {
           s.scene.table.ballMm = mm
-        }),
+        })
+      },
+      setGame: (game) => {
+        const { scene } = get()
+        if (gameOf(scene.table) === game) return
+        const next = convertScene(scene, game)
+        edit((s) => {
+          s.scene = next
+          s.selectedId = null
+        })
+      },
 
       /* the draft style also retargets the current selection, which is what a
          coach means by picking a colour while something is selected */
@@ -273,7 +309,7 @@ export const useStore = create<AppState>()(
       setWidth: (mm) => {
         set((s) => void (s.draft.width = mm))
         const id = get().selectedId
-        if (id) get().updateItem(id, { width: mm } as Partial<Item>)
+        if (id) get().updateItem(id, { width: scaledPreset(mm, get().scene.table) } as Partial<Item>)
       },
       setStyle: (style) => {
         set((s) => void (s.draft.style = style))
@@ -291,7 +327,7 @@ export const useStore = create<AppState>()(
       setTextSize: (mm) => {
         set((s) => void (s.draft.textSize = mm))
         const id = get().selectedId
-        if (id) get().updateItem(id, { size: mm } as Partial<Item>)
+        if (id) get().updateItem(id, { size: scaledPreset(mm, get().scene.table) } as Partial<Item>)
       },
 
       select: (id) => set((s) => void (s.selectedId = id)),
@@ -303,10 +339,25 @@ export const useStore = create<AppState>()(
         const wanted = at ?? { x: g.lengthMm / 2, y: g.widthMm / 2 }
         const p = freeSpot(g, scene.items, ballMm, clampToField(g, wanted, ballMm), noOverlap)
         const ball: BallItem = { id: newId('ball'), type: 'ball', x: p.x, y: p.y, kind }
+        // on a pool table an object ball is a numbered ball, and the next one
+        // out of the box is the lowest number not already on the table
+        if (kind !== 'cue' && isPool(scene.table)) ball.number = nextPoolNumber(scene.items)
         edit((s) => {
           s.scene.items.push(ball)
           s.selectedId = ball.id
         })
+      },
+
+      setBallNumber: (id, number) => {
+        const item = get().scene.items.find((i) => i.id === id)
+        if (!item || item.type !== 'ball') return
+        if (number === 'cue') {
+          if (item.kind !== 'cue') get().updateItem(id, { kind: 'cue' } as Partial<Item>)
+          return
+        }
+        if (!Number.isInteger(number) || number < 1 || number > 15) return
+        if (item.kind !== 'cue' && item.number === number) return
+        get().updateItem(id, { kind: 'white', number } as Partial<Item>)
       },
 
       addItem: (item, placement = 'top') =>
@@ -373,10 +424,10 @@ export const useStore = create<AppState>()(
         } as Partial<Item>)
       },
 
-      setStrikeSize: (id, mm) =>
-        get().updateItem(id, {
-          sizeMm: Math.round(Math.min(STRIKE_MAX_MM, Math.max(STRIKE_MIN_MM, mm))),
-        } as Partial<Item>),
+      setStrikeSize: (id, mm) => {
+        const [lo, hi] = strikeRange(get().scene.table)
+        get().updateItem(id, { sizeMm: Math.round(Math.min(hi, Math.max(lo, mm))) } as Partial<Item>)
+      },
 
       updateItem: (id, patch) => edit((s) => patchItem(s, id, patch)),
       updateItemLive: (id, patch) => set((s) => patchItem(s, id, patch)),
@@ -496,6 +547,26 @@ export const useStore = create<AppState>()(
         balls.push({ id: newId('ball'), type: 'ball', x: cue.x, y: cue.y, kind: 'cue' })
         edit((s) => {
           // keep everything that is not a ball: the drawing survives a re-rack
+          s.scene.items = [...s.scene.items.filter((i) => i.type !== 'ball'), ...balls]
+          s.selectedId = null
+        })
+      },
+
+      rackPool: (rack) => {
+        const g = geom()
+        const ballMm = get().scene.table.ballMm
+        const balls: Item[] = poolRackBalls(g, ballMm, rack).map((p) => ({
+          id: newId('ball'),
+          type: 'ball',
+          x: p.x,
+          y: p.y,
+          kind: 'white',
+          number: p.number,
+        }))
+        // the cue ball is broken from the kitchen, behind the head string
+        const cue = housePoint(g)
+        balls.push({ id: newId('ball'), type: 'ball', x: cue.x, y: cue.y, kind: 'cue' })
+        edit((s) => {
           s.scene.items = [...s.scene.items.filter((i) => i.type !== 'ball'), ...balls]
           s.selectedId = null
         })

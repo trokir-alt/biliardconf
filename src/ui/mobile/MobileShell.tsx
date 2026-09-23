@@ -13,7 +13,9 @@ import { selectCanRedo, selectCanUndo, useStore, type Tool } from '../../state/s
 import { useView } from '../../state/view'
 import { BALL_SIZES } from '../../model/table'
 import type { ExportFormat } from '../../lib/exportImage'
-import { GLYPH, TOOLS } from '../tools'
+import { GLYPH, toolsFor } from '../tools'
+import { GamePicker, RackButtons } from '../GameControls'
+import { useGame } from '../useGame'
 import { BrandSign } from '../Brand'
 import { DensityPicker } from '../DensityPicker'
 import { SyncBadge } from '../SyncBadge'
@@ -30,6 +32,7 @@ export type MobileShellProps = {
 export function MobileShell({ stageRef, onExport, onCopy, onOpenLibrary }: MobileShellProps) {
   const [sheet, setSheet] = useState<'export' | 'menu' | null>(null)
   const tool = useStore((s) => s.tool)
+  const game = useGame()
   const setTool = useStore((s) => s.setTool)
   const title = useStore((s) => s.scene.title ?? '')
   const setTitle = useStore((s) => s.setTitle)
@@ -92,7 +95,7 @@ export function MobileShell({ stageRef, onExport, onCopy, onOpenLibrary }: Mobil
       </main>
 
       <nav className="m-dock" aria-label="Инструменты">
-        {TOOLS.map((t) => (
+        {toolsFor(game).map((t) => (
           <button
             key={t.id}
             type="button"
@@ -176,7 +179,7 @@ function ExportSheet({ open, onClose, onExport, onCopy }: { open: boolean; onClo
 }
 
 function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const rackPyramid = useStore((s) => s.rackPyramid)
+  const game = useGame()
   const createNew = useLibrary((s) => s.createNew)
   const orientation = useStore((s) => s.orientation)
   const setOrientation = useStore((s) => s.setOrientation)
@@ -197,17 +200,9 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   }
   return (
     <Sheet title="Стол" open={open} onClose={onClose}>
+      <GamePicker id="game-mobile" />
       <div className="row row--wrap">
-        <button
-          type="button"
-          className="btn"
-          onClick={() => {
-            rackPyramid()
-            onClose()
-          }}
-        >
-          Пирамида
-        </button>
+        <RackButtons after={onClose} />
         <button type="button" className="btn" onClick={askNew}>
           Новое упражнение
         </button>
@@ -232,21 +227,23 @@ function MenuSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           <button type="button" className="swatch" style={{ background: '#1F6B41' }} aria-pressed={cloth === 'green'} aria-label="Зелёное сукно" onClick={() => setCloth('green')} />
         </span>
       </div>
-      <div className="row">
-        <label className="row__label" htmlFor="m-ball-mm">
-          Диаметр шара
-        </label>
-        <span className="row__control">
-          <select id="m-ball-mm" className="select" value={ballMm} onChange={(e) => setBallMm(Number(e.target.value))}>
-            {BALL_SIZES.map((mm) => (
-              <option key={mm} value={mm}>
-                {mm}
-              </option>
-            ))}
-          </select>
-          <span className="row__unit">мм</span>
-        </span>
-      </div>
+      {game === 'pyramid' && (
+        <div className="row">
+          <label className="row__label" htmlFor="m-ball-mm">
+            Диаметр шара
+          </label>
+          <span className="row__control">
+            <select id="m-ball-mm" className="select" value={ballMm} onChange={(e) => setBallMm(Number(e.target.value))}>
+              {BALL_SIZES.map((mm) => (
+                <option key={mm} value={mm}>
+                  {mm}
+                </option>
+              ))}
+            </select>
+            <span className="row__unit">мм</span>
+          </span>
+        </div>
+      )}
       <label className="switch">
         <span className="switch__label">Разметка</span>
         <input type="checkbox" className="switch__input" checked={markings} onChange={toggleMarkings} />

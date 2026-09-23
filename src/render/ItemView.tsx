@@ -9,7 +9,7 @@
 
 import { Circle, Group } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
-import type { Item } from '../model/types'
+import type { Game, Item } from '../model/types'
 import { BallShape } from './BallShape'
 import {
   ArrowShape,
@@ -27,6 +27,8 @@ import { useView } from '../state/view'
 export type ItemViewProps = {
   item: Item
   ballMm: number
+  /** decides how a ball and the strike widget are coloured */
+  game: Game
   selected: boolean
   draggable: boolean
   onSelect: (e: KonvaEventObject<MouseEvent | TouchEvent>) => void
@@ -36,13 +38,14 @@ export type ItemViewProps = {
   onEdit?: (e: KonvaEventObject<MouseEvent | TouchEvent>) => void
 }
 
-function inner(item: Item, ballMm: number, selected: boolean, scale: number) {
+function inner(item: Item, ballMm: number, game: Game, selected: boolean, scale: number) {
   const st = useStore.getState
   switch (item.type) {
     case 'strikePoint':
       return (
         <StrikePointShape
           item={item}
+          game={game}
           scale={scale}
           magnet={st().snap}
           onDotStart={() => st().beginHistory()}
@@ -75,9 +78,9 @@ function inner(item: Item, ballMm: number, selected: boolean, scale: number) {
   }
 }
 
-export function ItemView({ item, ballMm, onEdit, ...rest }: ItemViewProps) {
+export function ItemView({ item, ballMm, game, onEdit, ...rest }: ItemViewProps) {
   const scale = useView((s) => s.layout?.scale ?? 0.3)
-  if (item.type === 'ball') return <BallShape item={item} ballMm={ballMm} scale={scale} {...rest} />
+  if (item.type === 'ball') return <BallShape item={item} ballMm={ballMm} game={game} scale={scale} {...rest} />
   const { selected, ...handlers } = rest
   // the wireframe ball is positioned like a real ball, so the stage can clamp
   // and contact-snap it from the node's own coordinates
@@ -116,7 +119,7 @@ export function ItemView({ item, ballMm, onEdit, ...rest }: ItemViewProps) {
       onDblClick={onEdit}
       onDblTap={onEdit}
     >
-      {inner(item, ballMm, selected, scale)}
+      {inner(item, ballMm, game, selected, scale)}
     </Group>
   )
 }

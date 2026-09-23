@@ -6,11 +6,13 @@
  * caption has no stroke width and a zone has no arrowhead.
  */
 
-import { useMemo } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '../state/store'
 import { mmToCss, useView } from '../state/view'
-import { FULLNESS_STEPS, itemBounds } from '../model/item'
+import { FULLNESS_STEPS, STRIKE_SIZES, itemBounds } from '../model/item'
 import { INK, STROKE_WIDTHS, TEXT_SIZES } from '../model/style'
+import { gameOf, scaledPreset } from '../model/game'
+import { PoolBallPicker } from './GameControls'
 import { formatPower } from '../model/item'
 import { useIsMobile } from './useMedia'
 
@@ -18,9 +20,24 @@ export function Properties() {
   const selectedId = useStore((s) => s.selectedId)
   const item = useStore((s) => s.scene.items.find((i) => i.id === s.selectedId))
   const ballMm = useStore((s) => s.scene.table.ballMm)
+  const table = useStore((s) => s.scene.table)
   const tool = useStore((s) => s.tool)
   const view = useView()
   const mobile = useIsMobile()
+  /**
+   * The panel's own width, measured. The clamp below used to assume 160 px,
+   * which every panel was until the pool ball picker - sixteen balls in two
+   * rows - and a ball near the right cushion then pushed half the picker off
+   * the screen. Measured after each render, so any panel is kept inside.
+   */
+  const ref = useRef<HTMLDivElement>(null)
+  const [panelW, setPanelW] = useState(160)
+  // what the panel holds is decided by the item and the tool; nothing else
+  // changes its width
+  useLayoutEffect(() => {
+    const w = ref.current?.offsetWidth
+    if (w && Math.abs(w - panelW) > 1) setPanelW(w)
+  }, [item, tool, panelW])
 
   const pos = useMemo(() => {
     if (!item || !view.layout) return null
@@ -46,14 +63,14 @@ export function Properties() {
      * was selected.
      */
     const minLeft = view.wrap.left + 8
-    const maxLeft = Math.max(minLeft, view.wrap.left + view.wrap.width - 160)
+    const maxLeft = Math.max(minLeft, view.wrap.left + view.wrap.width - panelW - 8)
     const raw = Math.min(...corners.map((c) => c.x))
     return {
       left: Math.max(minLeft, Math.min(raw, maxLeft)),
       top: Math.max(...ys) + 12,
       low: (Math.min(...ys) + Math.max(...ys)) / 2 > mid,
     }
-  }, [item, ballMm, view])
+  }, [item, ballMm, view, panelW])
 
   if (!item || !selectedId || tool !== 'select') return null
   const st = useStore.getState()
@@ -73,9 +90,13 @@ export function Properties() {
   const hasPower = t === 'power'
 
   const color = 'color' in item ? item.color : null
+  const pool = gameOf(table) === 'pool'
+  // every preset is shown and matched as it comes out on THIS table
+  const on = (referenceMm: number) => scaledPreset(referenceMm, table)
 
   return (
     <div
+      ref={ref}
       className={mobile && pos?.low ? 'props props--top' : 'props'}
       role="toolbar"
       aria-label="Свойства объекта"
@@ -99,7 +120,30 @@ export function Properties() {
         </div>
       )}
 
-      {hasBall && (
+      {hasBall && pool && (
+        <div className="props__row">
+          <PoolBallPicker item={item} />
+        </div>
+      )}
+
+      {/* a numbered ball carries its number; only the cue ball can take a mark */}
+      {hasBall && pool && item.kind === 'cue' && (
+        <div className="props__row">
+          <span className="props__label">Подпись</span>
+          <input
+            className="input input--sm"
+            type="text"
+            maxLength={2}
+            placeholder="A"
+            aria-label="Подпись на шаре"
+            value={item.label ?? ''}
+            onChange={(e) => st.updateItemLive(item.id, { label: e.target.value.trim() || undefined })}
+            onBlur={() => st.beginHistory()}
+          />
+        </div>
+      )}
+
+      {hasBall && !pool && (
         <div className="props__row">
           <span className="seg">
             <button type="button" className="btn seg__btn" aria-pressed={item.kind === 'white'} onClick={() => st.updateItem(item.id, { kind: 'white' })}>
@@ -127,7 +171,7 @@ export function Properties() {
           {hasWidth && (
             <span className="seg" role="group" aria-label="Толщина">
               {STROKE_WIDTHS.map((w) => (
-                <button key={w} type="button" className="btn seg__btn" aria-pressed={'width' in item && item.width === w} onClick={() => st.setWidth(w)} title={`${w} мм`}>
+                <button key={w} type="button" className="btn seg__btn" aria-pressed={'width' in item && item.width === on(w)} onClick={() => st.setWidth(w)} title={`${on(w)} мм`}>
                   <span className="stroke-sample" style={{ height: Math.max(2, w / 3) }} />
                 </button>
               ))}
@@ -200,7 +244,7 @@ export function Properties() {
         <div className="props__row">
           <span className="seg" role="group" aria-label="Размер текста">
             {TEXT_SIZES.map((sz, i) => (
-              <button key={sz} type="button" className="btn seg__btn" aria-pressed={item.size === sz} onClick={() => st.setTextSize(sz)} title={`${sz} мм`}>
+              <button key={sz} type="button" className="btn seg__btn" aria-pressed={item.size === on(sz)} onClick={() => st.setTextSize(sz)} title={`${on(sz)} мм`}>
                 {['S', 'M', 'L'][i]}
               </button>
             ))}
@@ -215,9 +259,9 @@ export function Properties() {
         <div className="props__row">
           <span className="props__label">Размер</span>
           <span className="seg" role="group" aria-label="Размер шара">
-            {[200, 300, 400, 500].map((mm) => (
-              <button key={mm} type="button" className="btn seg__btn" aria-pressed={item.sizeMm === mm} onClick={() => st.setStrikeSize(item.id, mm)}>
-                {mm}
+            {STRIKE_SIZES.map((mm) => (
+              <button key={mm} type="button" className="btn seg__btn" aria-pressed={item.sizeMm === on(mm)} onClick={() => st.setStrikeSize(item.id, on(mm))}>
+                {on(mm)}
               </button>
             ))}
           </span>
